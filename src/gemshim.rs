@@ -90,39 +90,23 @@ fn wait_ready(port: u16) -> Result<()> {
     anyhow::bail!("timed out waiting for gemshim on 127.0.0.1:{port}")
 }
 
-/// A throwaway HOME with a `.gemini/settings.json` that selects API-key auth,
-/// trusts the workspace, and (Policy Engine) auto-allows only read-only git -
-/// the headless config gemini-cli 0.46 needs. Isolated so it never touches a
-/// user's real ~/.gemini.
+/// A throwaway HOME with a `.gemini/settings.json` selecting API-key auth and
+/// trusting the workspace, so the gemini CLI runs headless against the bridge
+/// without touching the user's real ~/.gemini. Read-only is enforced by the
+/// CLI's `--approval-mode default` (see agents.rs), not by a policy file.
 fn make_gemini_home(_port: u16) -> Result<PathBuf> {
     let dir = std::env::temp_dir().join(format!("postmortem-gemini-{}", std::process::id()));
     let gem = dir.join(".gemini");
-    std::fs::create_dir_all(gem.join("policies"))?;
+    std::fs::create_dir_all(&gem)?;
     std::fs::File::create(gem.join("settings.json"))?.write_all(GEMINI_SETTINGS.as_bytes())?;
-    std::fs::File::create(gem.join("policies").join("readonly-git.toml"))?
-        .write_all(GEMINI_POLICY.as_bytes())?;
     Ok(dir)
 }
 
-/// gemini-cli 0.46 settings: API-key auth (the bridge supplies a dummy key;
-/// gemshim swaps in the real OpenRouter key) + folder trust enabled.
+/// gemini-cli settings: API-key auth (the bridge supplies a dummy key; gemshim
+/// swaps in the real OpenRouter key) + folder trust enabled.
 const GEMINI_SETTINGS: &str = r#"{
   "security": {
     "auth": { "selectedType": "gemini-api-key" },
     "folderTrust": { "enabled": true }
   }
 }"#;
-
-/// Policy Engine rule (0.46 replaced `--allowed-tools` with this). Auto-allows
-/// only the read-only git commands the review needs; everything else has no
-/// allow rule and falls through to `ask_user`, which headless is treated as
-/// deny - so a tool call can never run e.g. `git reset --hard` on the changes
-/// under review. Run with `--approval-mode default` for this to hold.
-/// `commandPrefix` is start-of-string and chained segments are checked
-/// individually, so `git diff && rm -rf x` does not get a blanket allow.
-const GEMINI_POLICY: &str = r#"[[rule]]
-toolName = "run_shell_command"
-commandPrefix = ["git diff", "git log", "git show", "git status"]
-decision = "allow"
-priority = 100
-"#;
