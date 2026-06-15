@@ -44,6 +44,13 @@ impl Gg {
         cmd
     }
 
+    /// `gg update -u`: update every tool gg manages, in parallel.
+    pub fn update_all(&self) -> Command {
+        let mut cmd = self.base();
+        cmd.arg("update").arg("-u");
+        cmd
+    }
+
     /// Does this gg know the agent CLI tools? Offline check against its
     /// baked-in registry; also weeds out pre-applet gg versions, which choke
     /// on the `gg` jump-out word.
