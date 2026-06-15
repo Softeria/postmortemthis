@@ -1,8 +1,9 @@
-// Minimal Gemini-native -> OpenRouter (OpenAI chat/completions) translator.
-// Lets the official gemini-cli run against OpenRouter, which exposes no
-// Gemini-protocol endpoint. Buffered: calls OpenRouter non-streaming and
-// emits a single Gemini response (even for :streamGenerateContent), so we
-// skip streaming-delta reassembly. Smoke-test scope: text + function calling.
+//! Gemini-native -> OpenRouter (OpenAI chat/completions) translator. Lets the
+//! gemini CLI run against OpenRouter, which exposes no Gemini-protocol
+//! endpoint. Runs as the hidden `postmortem __gemshim` subcommand, spawned by
+//! the launcher (see `gemshim.rs`) and configured via env. Buffered: calls
+//! OpenRouter non-streaming and emits a single Gemini response (even for
+//! :streamGenerateContent), so there is no streaming-delta reassembly.
 use axum::{
     body::{Body, Bytes},
     extract::State,
@@ -21,8 +22,17 @@ struct Cfg {
     model: String,
 }
 
-#[tokio::main]
-async fn main() {
+/// Entry point for the hidden subcommand: builds a runtime and serves until
+/// killed. Config comes from OPENROUTER_API_KEY / GEMSHIM_PORT / GEMSHIM_MODEL.
+pub fn run() {
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .expect("tokio runtime");
+    rt.block_on(serve());
+}
+
+async fn serve() {
     let cfg = Arc::new(Cfg {
         client: reqwest::Client::new(),
         key: std::env::var("OPENROUTER_API_KEY").expect("OPENROUTER_API_KEY"),
@@ -233,10 +243,10 @@ fn openai_to_gemini(oai: &Value) -> Value {
     let finish = choice.and_then(|c| c.get("finish_reason")).and_then(Value::as_str).unwrap_or("stop");
 
     let mut parts: Vec<Value> = Vec::new();
-    if let Some(content) = msg.and_then(|m| m.get("content")).and_then(Value::as_str) {
-        if !content.is_empty() {
-            parts.push(json!({"text": content}));
-        }
+    if let Some(content) = msg.and_then(|m| m.get("content")).and_then(Value::as_str)
+        && !content.is_empty()
+    {
+        parts.push(json!({"text": content}));
     }
     for tc in msg.and_then(|m| m.get("tool_calls")).and_then(Value::as_array).into_iter().flatten() {
         let f = tc.get("function");

@@ -36,23 +36,23 @@ impl Bridge {
     /// the OpenRouter slug gemshim forwards to. Returns the running bridge;
     /// the caller holds it for the lifetime of the review.
     pub fn start(or_key: &str, model: &str) -> Result<Bridge> {
-        let bin = locate().context(
-            "gemshim binary not found next to postmortem - the Gemini-on-OpenRouter \
-             bridge needs it (build the workspace, or install both binaries together)",
-        )?;
+        let exe = std::env::current_exe().context("cannot locate own executable for the gemshim bridge")?;
         let port = free_port().context("no free loopback port for gemshim")?;
         let home = make_gemini_home(port)?;
 
-        let child = std::process::Command::new(&bin)
+        // The bridge is this same binary's hidden `__gemshim` subcommand, so
+        // it can never version-mismatch the launcher.
+        let child = std::process::Command::new(&exe)
+            .arg("__gemshim")
             .env("OPENROUTER_API_KEY", or_key)
             .env("GEMSHIM_PORT", port.to_string())
             .env("GEMSHIM_MODEL", model)
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
             .spawn()
-            .with_context(|| format!("failed to spawn gemshim ({})", bin.display()))?;
+            .with_context(|| format!("failed to spawn gemshim bridge ({})", exe.display()))?;
 
-        wait_ready(port).context("gemshim did not come up on its port")?;
+        wait_ready(port).context("gemshim bridge did not come up on its port")?;
         let _ = ENDPOINT.set((port, home.clone()));
         Ok(Bridge { child, home, port })
     }
@@ -68,29 +68,6 @@ impl Drop for Bridge {
         let _ = self.child.wait();
         let _ = std::fs::remove_dir_all(&self.home);
     }
-}
-
-/// Find the gemshim binary: a sibling of the running executable (the layout
-/// for both `cargo build` and a paired install), else on PATH.
-fn locate() -> Option<PathBuf> {
-    let name = if cfg!(windows) { "gemshim.exe" } else { "gemshim" };
-    if let Ok(exe) = std::env::current_exe()
-        && let Some(dir) = exe.parent()
-    {
-        let sibling = dir.join(name);
-        if sibling.is_file() {
-            return Some(sibling);
-        }
-    }
-    // PATH fallback: trust the bare name and let the spawn error surface.
-    which(name)
-}
-
-fn which(name: &str) -> Option<PathBuf> {
-    let path = std::env::var_os("PATH")?;
-    std::env::split_paths(&path)
-        .map(|d| d.join(name))
-        .find(|p| p.is_file())
 }
 
 /// Ask the OS for an unused loopback port, then release it for gemshim to

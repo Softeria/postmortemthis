@@ -1,5 +1,6 @@
 mod agents;
 mod gemshim;
+mod gemshim_server;
 mod gg;
 mod git;
 mod openrouter;
@@ -35,6 +36,10 @@ enum Cmd {
     Skill,
     /// Review pending changes (default command).
     Review(ReviewArgs),
+    /// Internal: run the Gemini->OpenRouter bridge server. Spawned by the
+    /// tool itself (see gemshim.rs); not for direct use.
+    #[command(name = "__gemshim", hide = true)]
+    Gemshim,
 }
 
 #[derive(clap::Args, Default)]
@@ -79,6 +84,10 @@ fn main() -> Result<()> {
             Ok(())
         }
         Some(Cmd::Review(args)) => review(args),
+        Some(Cmd::Gemshim) => {
+            gemshim_server::run();
+            Ok(())
+        }
         None => review(cli.review),
     }
 }
