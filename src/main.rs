@@ -2,21 +2,18 @@ mod agents;
 mod gemshim;
 mod gemshim_server;
 mod gg;
-mod git;
 mod openrouter;
-mod prompts;
 mod runner;
 
 use agents::{Agent, Via};
 use anyhow::{Result, bail};
 use clap::{Parser, Subcommand};
-use runner::{Outcome, Report};
+use runner::Outcome;
+use std::io::Read;
 use std::time::Duration;
 
-/// One last look before you ship.
-///
-/// Runs every AI agent CLI you have - each with its own model and its own
-/// native harness - on your pending changes, then synthesizes a single verdict.
+/// Run the AI agent CLIs you have, in parallel, on one prompt, and print each
+/// one's output. The prompt is read from stdin; the caller decides what it says.
 #[derive(Parser)]
 #[command(name = "postmortem", version, about)]
 struct Cli {
@@ -24,7 +21,7 @@ struct Cli {
     command: Option<Cmd>,
 
     #[command(flatten)]
-    review: ReviewArgs,
+    run: RunArgs,
 }
 
 #[derive(Subcommand)]
@@ -34,25 +31,15 @@ enum Cmd {
     /// Print instructions for an AI agent to build a Claude Code skill that
     /// drives this tool. Meant to be read by the agent, not the user.
     Skill,
-    /// Review pending changes (default command).
-    Review(ReviewArgs),
-    /// Internal: run the Gemini->OpenRouter bridge server. Spawned by the
-    /// tool itself (see gemshim.rs); not for direct use.
+    /// Internal: run the Gemini->OpenRouter bridge server. Spawned by the tool
+    /// itself; not for direct use.
     #[command(name = "__gemshim", hide = true)]
     Gemshim,
 }
 
 #[derive(clap::Args, Default)]
-struct ReviewArgs {
-    /// Review staged changes only (git diff --cached).
-    #[arg(long, conflicts_with = "base")]
-    staged: bool,
-
-    /// Review against a base ref (e.g. main, HEAD~3) instead of the working tree.
-    #[arg(long)]
-    base: Option<String>,
-
-    /// Comma-separated agents to use (default: all installed).
+struct RunArgs {
+    /// Comma-separated agents to run (default: all available).
     #[arg(long, value_delimiter = ',')]
     agents: Vec<String>,
 
@@ -60,17 +47,8 @@ struct ReviewArgs {
     #[arg(long, default_value_t = 600)]
     timeout: u64,
 
-    /// Skip the synthesis pass; print raw per-agent reports only.
-    #[arg(long)]
-    no_synth: bool,
-
-    /// Write the full report to a file as well as stdout.
-    #[arg(short, long)]
-    output: Option<std::path::PathBuf>,
-
-    /// OpenRouter API key for agents you have no native login for; those
-    /// CLIs are pointed at OpenRouter on this key. Also read from
-    /// OPENROUTER_API_KEY or ~/.config/postmortem/key.
+    /// OpenRouter API key for agents you have no native login for. Also read
+    /// from OPENROUTER_API_KEY or ~/.config/postmortem/key.
     #[arg(long)]
     key: Option<String>,
 }
@@ -83,49 +61,55 @@ fn main() -> Result<()> {
             print!("{SKILL_INSTRUCTIONS}");
             Ok(())
         }
-        Some(Cmd::Review(args)) => review(args),
         Some(Cmd::Gemshim) => {
             gemshim_server::run();
             Ok(())
         }
-        None => review(cli.review),
+        None => run(cli.run),
     }
 }
 
-/// Read by an AI agent (via `postmortem skill`) to author a Claude Code skill.
-/// Kept terse on purpose - it's the whole user-facing setup surface, reached by
-/// a one-line "create a postmortem skill, download <url> and run it" prompt.
-const SKILL_INSTRUCTIONS: &str = r#"You are setting up a Claude Code skill for `postmortem`, a multi-model
-pre-ship code review. Create the skill, then tell the user it's ready.
+fn run(args: RunArgs) -> Result<()> {
+    openrouter::init(args.key.as_deref());
 
-Skill name: postmortem
-Description (write it so you auto-invoke on these): the user wants a final
-review, a second opinion, a "panel review", or a pre-ship check on their
-changes, or says "postmortem this".
+    let mut prompt = String::new();
+    let _ = std::io::stdin().read_to_string(&mut prompt);
+    if prompt.trim().is_empty() {
+        bail!("no prompt on stdin (pipe one in, e.g. `echo '...' | postmortem`)");
+    }
 
-The skill must instruct you to:
-1. Pick what to review: uncommitted changes by default; `--staged` if they're
-   about to commit staged work; `--base <ref>` to compare against a branch.
-2. Run the panel WITHOUT its built-in synthesis (you synthesize):
-       postmortem --no-synth --timeout 600
-   (If `postmortem` isn't on PATH, run `./postmortemthis.cmd --no-synth
-   --timeout 600` from the repo root.) It fans out to every available agent
-   CLI (Claude, Codex, Gemini) in parallel, read-only. Agents the user is
-   logged into use their own accounts; the rest use OPENROUTER_API_KEY if set,
-   else are skipped. Always run it; do not substitute your own review. The
-   point is to get independent models, not the same one twice.
-3. Read the per-agent reports from stdout and synthesize ONE verdict: merge and
-   deduplicate findings, weight by cross-agent consensus (several models
-   agreeing = high signal; a lone flag = a skeptical look), drop false
-   positives using what you see in the repo, rank by severity with file:line,
-   and end with a clear ship / don't-ship call.
-4. If some agents failed or timed out, say which and synthesize from the rest
-   (note the verdict is partial).
+    let selected = select_agents(&args.agents)?;
+    let cwd = std::env::current_dir()?;
+    let timeout = Duration::from_secs(args.timeout);
 
-Place it where skills live on this setup: `.claude/skills/postmortem/SKILL.md`
-for this repo, or `~/.claude/skills/postmortem/SKILL.md` for all repos - ask the
-user which if unsure. Use the current skill frontmatter format.
-"#;
+    let _bridge = start_gemini_bridge(&selected);
+
+    eprintln!(
+        "postmortem: running {} agent(s) in parallel: {}",
+        selected.len(),
+        selected.iter().map(|a| a.name()).collect::<Vec<_>>().join(", ")
+    );
+
+    prewarm(&selected, &cwd);
+
+    let reports = runner::run_all(&selected, &prompt, &cwd, timeout)?;
+
+    for r in &reports {
+        println!("\n\n# {}\n", r.agent.name());
+        match &r.outcome {
+            Outcome::Ok => println!("{}", r.output.trim()),
+            Outcome::TimedOut => println!("_timed out_"),
+            Outcome::Failed(why) => {
+                println!("_failed: {why}_\n\n```\n{}\n```", r.stderr.trim());
+            }
+        }
+    }
+
+    if reports.iter().all(|r| r.outcome != Outcome::Ok) {
+        bail!("all agents failed");
+    }
+    Ok(())
+}
 
 fn doctor() -> Result<()> {
     openrouter::init(None);
@@ -153,8 +137,7 @@ fn doctor() -> Result<()> {
         match agent.via() {
             Some(Via::Native) => {
                 any = true;
-                let version = agent.native_version().unwrap_or_default();
-                println!("  + {:<8} {}", agent.name(), version);
+                println!("  + {:<8} {}", agent.name(), agent.native_version().unwrap_or_default());
                 println!("    auth: {auth}");
             }
             Some(Via::Gg) => {
@@ -166,20 +149,86 @@ fn doctor() -> Result<()> {
         }
     }
     if !any {
-        println!("\nNo agent CLIs found. Install one of claude, codex, gemini - or run");
+        println!("\nNo agent CLIs found. Install one of claude, codex, gemini, or run");
         println!("postmortem through postmortemthis.cmd, which bootstraps them itself.");
     }
     Ok(())
 }
 
-/// OpenRouter slug gemshim forwards the Gemini leg to.
+fn select_agents(requested: &[String]) -> Result<Vec<Agent>> {
+    let explicit = !requested.is_empty();
+    let candidates: Vec<Agent> = if requested.is_empty() {
+        agents::ALL.to_vec()
+    } else {
+        requested
+            .iter()
+            .map(|s| {
+                Agent::from_name(s)
+                    .ok_or_else(|| anyhow::anyhow!("unknown agent '{s}' (known: claude, codex, gemini)"))
+            })
+            .collect::<Result<_>>()?
+    };
+
+    let mut selected: Vec<Agent> = Vec::new();
+    for agent in candidates {
+        if selected.contains(&agent) {
+            continue;
+        }
+        match agent.via() {
+            Some(Via::Native) => selected.push(agent),
+            // Auto-pick a gg-bootstrapped agent only if it can actually run:
+            // own login, or an OpenRouter key. An explicit --agents overrides.
+            Some(Via::Gg) if explicit || agent.authed() || openrouter::key().is_some() => {
+                selected.push(agent)
+            }
+            Some(Via::Gg) => eprintln!(
+                "postmortem: skipping {} (no credentials - log in once, or pass --key)",
+                agent.name()
+            ),
+            None if explicit => bail!(
+                "agent '{}' was requested but is not installed and no gg.cmd is available",
+                agent.name()
+            ),
+            None => {}
+        }
+    }
+    if selected.is_empty() {
+        bail!("no agent CLIs available - run `postmortem doctor`");
+    }
+    Ok(selected)
+}
+
+/// One chained gg invocation prepares every needed tool in parallel before the
+/// fan-out, so the per-agent timeout is spent running, not bootstrapping.
+fn prewarm(selected: &[Agent], dir: &std::path::Path) {
+    let tools: Vec<&str> = selected
+        .iter()
+        .filter(|a| a.via() == Some(Via::Gg))
+        .map(|a| a.gg_tool())
+        .collect();
+    let Some(gg) = gg::locate() else { return };
+    if tools.is_empty() {
+        return;
+    }
+    eprintln!("postmortem: bootstrapping {} (first run may download)", tools.join(", "));
+    match gg
+        .tool(&tools.join(":"))
+        .arg("--version")
+        .current_dir(dir)
+        .stdout(std::process::Stdio::null())
+        .status()
+    {
+        Ok(s) if s.success() => {}
+        Ok(s) => eprintln!("postmortem: gg prewarm exited with {s}; continuing"),
+        Err(e) => eprintln!("postmortem: gg prewarm failed: {e}; continuing"),
+    }
+}
+
+/// OpenRouter slug the Gemini leg forwards to when it has no native login.
 const GEMINI_OPENROUTER_MODEL: &str = "google/gemini-3.1-pro-preview";
 
-/// Start the gemshim bridge iff the Gemini leg is selected and will run on
-/// OpenRouter (no native Google login, but a key is present). Returns the
-/// running bridge to hold for the review's lifetime; None when Gemini runs
-/// natively, isn't selected, or no key is set. A spawn failure is reported
-/// and the Gemini leg simply errors like any other unavailable agent.
+/// Bring up the gemshim bridge when the Gemini leg will run on OpenRouter
+/// (selected, no native Google login, key present). Held for the run.
 fn start_gemini_bridge(selected: &[Agent]) -> Option<gemshim::Bridge> {
     let needs_bridge =
         selected.contains(&Agent::Gemini) && !Agent::Gemini.authed() && openrouter::key().is_some();
@@ -202,172 +251,31 @@ fn start_gemini_bridge(selected: &[Agent]) -> Option<gemshim::Bridge> {
     }
 }
 
-fn select_agents(requested: &[String]) -> Result<Vec<Agent>> {
-    let explicit = !requested.is_empty();
-    let candidates: Vec<Agent> = if requested.is_empty() {
-        agents::ALL.to_vec()
-    } else {
-        requested
-            .iter()
-            .map(|s| {
-                Agent::from_name(s).ok_or_else(|| {
-                    anyhow::anyhow!("unknown agent '{s}' (known: claude, codex, gemini)")
-                })
-            })
-            .collect::<Result<_>>()?
-    };
+/// Read by an AI agent (via `postmortem skill`) to author a Claude Code skill.
+/// This is the whole user-facing setup surface, reached by a one-line prompt
+/// that downloads the tool and runs `postmortemthis.cmd skill`.
+const SKILL_INSTRUCTIONS: &str = r#"You are setting up a Claude Code skill that runs a multi-model review with
+`postmortem`. postmortem runs every agent CLI the user has (Claude, Codex,
+Gemini) in parallel on a prompt piped to its stdin, read-only, and prints each
+one's output. It does nothing else: you compose the prompt, and you synthesize
+the outputs.
 
-    let mut selected: Vec<Agent> = Vec::new();
-    for agent in candidates {
-        if selected.contains(&agent) {
-            continue;
-        }
-        match agent.via() {
-            Some(Via::Native) => selected.push(agent),
-            // By default only auto-pick gg-bootstrapped agents the user can
-            // actually run: own login, or an OpenRouter key (every agent can
-            // reach OpenRouter - Gemini via the gemshim bridge). An explicit
-            // --agents overrides.
-            Some(Via::Gg) if explicit || agent.authed() || openrouter::key().is_some() => {
-                selected.push(agent)
-            }
-            Some(Via::Gg) => eprintln!(
-                "postmortem: skipping {} (no credentials - log in once, or pass --key)",
-                agent.name()
-            ),
-            None if explicit => bail!(
-                "agent '{}' was requested but is not installed and no gg.cmd is available",
-                agent.name()
-            ),
-            None => {}
-        }
-    }
-    if selected.is_empty() {
-        bail!("no agent CLIs available - run `postmortem doctor`");
-    }
-    Ok(selected)
-}
+Create a skill that fires when the user asks for a review, a second opinion, a
+panel review, or says "postmortem this". It should:
+1. Compose a review prompt describing what to look at and what to report. For
+   pending changes, tell the agents to inspect the diff with their own tools
+   (each agent runs read-only).
+2. Pipe that prompt to the tool, in the repo:
+       echo "<your prompt>" | postmortem --timeout 600
+   (Use `./postmortemthis.cmd` instead if `postmortem` is not on PATH; it
+   bootstraps the binary and any missing agent CLIs on first run.) Agents the
+   user is logged into run on their own accounts; the rest use
+   OPENROUTER_API_KEY if set, else are skipped.
+3. Read the per-agent outputs from stdout and synthesize one verdict: merge and
+   deduplicate findings, weight by cross-agent consensus, drop false positives,
+   rank by severity with file:line, and end with a clear ship / don't-ship call.
 
-/// One chained gg invocation (`claude:codex:gemini-cli ... --version`) so gg
-/// downloads/prepares every needed tool in parallel before the fan-out, and
-/// the per-agent timeout is spent on review, not bootstrap.
-fn prewarm(selected: &[Agent], repo: &std::path::Path) {
-    let tools: Vec<&str> = selected
-        .iter()
-        .filter(|a| a.via() == Some(Via::Gg))
-        .map(|a| a.gg_tool())
-        .collect();
-    let Some(gg) = gg::locate() else { return };
-    if tools.is_empty() {
-        return;
-    }
-    eprintln!(
-        "postmortem: bootstrapping {} (first run may download)",
-        tools.join(", ")
-    );
-    let result = gg
-        .tool(&tools.join(":"))
-        .arg("--version")
-        .current_dir(repo)
-        .stdout(std::process::Stdio::null())
-        .status();
-    match result {
-        Ok(s) if s.success() => {}
-        Ok(s) => eprintln!("postmortem: gg prewarm exited with {s}; continuing"),
-        Err(e) => eprintln!("postmortem: gg prewarm failed: {e}; continuing"),
-    }
-}
-
-fn review(args: ReviewArgs) -> Result<()> {
-    openrouter::init(args.key.as_deref());
-    let diff = git::resolve(args.staged, args.base.as_deref())?;
-    let selected = select_agents(&args.agents)?;
-    let timeout = Duration::from_secs(args.timeout);
-
-    // If the Gemini leg will run on OpenRouter (selected, no native Google
-    // login, key present), bring up the local gemshim bridge for its lifetime.
-    // Held until the end of the review; dropping it kills gemshim.
-    let _gemini_bridge = start_gemini_bridge(&selected);
-
-    eprintln!(
-        "postmortem: reviewing `{}` with {} agent(s): {}",
-        diff.command,
-        selected.len(),
-        selected
-            .iter()
-            .map(|a| a.name())
-            .collect::<Vec<_>>()
-            .join(", ")
-    );
-    eprintln!("{}\n", diff.stat);
-
-    if !diff.untracked.is_empty() {
-        let shown: Vec<&str> = diff.untracked.iter().take(5).map(String::as_str).collect();
-        eprintln!(
-            "warning: {} untracked file(s) are invisible to this review ({}{}) - `git add` them to include them",
-            diff.untracked.len(),
-            shown.join(", "),
-            if diff.untracked.len() > 5 { ", ..." } else { "" }
-        );
-    }
-
-    prewarm(&selected, &diff.repo_root);
-
-    let prompt = prompts::review(&diff);
-    let reports = runner::run_all(&selected, &prompt, &diff.repo_root, timeout)?;
-
-    let ok: Vec<&Report> = reports
-        .iter()
-        .filter(|r| r.outcome == Outcome::Ok && !r.output.trim().is_empty())
-        .collect();
-
-    let mut doc = String::new();
-    for r in &reports {
-        doc.push_str(&format!("\n\n# Agent: {}\n\n", r.agent.name()));
-        match &r.outcome {
-            Outcome::Ok => doc.push_str(r.output.trim()),
-            Outcome::TimedOut => doc.push_str("_Timed out._"),
-            Outcome::Failed(why) => {
-                doc.push_str(&format!("_Failed: {why}_\n\n```\n{}\n```", r.stderr.trim()));
-            }
-        }
-    }
-
-    // Synthesis: only meaningful with 2+ successful reports. Claude chairs
-    // if its review succeeded; otherwise the first agent that delivered -
-    // never an excluded agent, never one that just failed or timed out.
-    if !args.no_synth && ok.len() >= 2 {
-        let chair = ok
-            .iter()
-            .find(|r| r.agent == Agent::Claude)
-            .or_else(|| ok.first())
-            .map(|r| r.agent);
-        if let Some(chair) = chair {
-            eprintln!("\n  [synthesis] chaired by {}...", chair.name());
-            let synth_prompt = prompts::synthesis(&ok);
-            let synth = runner::run_all(&[chair], &synth_prompt, &diff.repo_root, timeout)?;
-            let synth = &synth[0];
-            if synth.outcome == Outcome::Ok {
-                doc = format!("{}\n\n---\n{}", synth.output.trim(), doc);
-            } else {
-                eprintln!("  [synthesis] failed; printing raw reports");
-            }
-        }
-    }
-
-    println!("{}", doc.trim());
-
-    if let Some(path) = &args.output {
-        std::fs::write(path, doc.trim())?;
-        eprintln!("\nreport written to {}", path.display());
-    }
-
-    let failures = reports.iter().any(|r| r.outcome != Outcome::Ok);
-    if ok.is_empty() {
-        bail!("all agents failed");
-    }
-    if failures {
-        eprintln!("\nwarning: some agents did not complete; verdict is partial");
-    }
-    Ok(())
-}
+Place it at `.claude/skills/postmortem/SKILL.md` for this repo, or
+`~/.claude/skills/postmortem/SKILL.md` for all repos. Use the current skill
+frontmatter format.
+"#;

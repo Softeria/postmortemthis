@@ -89,30 +89,10 @@ impl Agent {
                 a.extend_from_slice(&["--sandbox", "read-only", "-"]);
                 a
             }
-            // Reading files needs no approval, but the shell tool does -
-            // without the allowlist the headless leg cannot run `git diff`
-            // and reviews blind. Only read-only git subcommands: gemini has
-            // no sandbox here, and a blanket `git` grant would auto-approve
-            // `git reset --hard` on the very changes under review.
-            // (--allowed-tools is deprecated in favor of the policy engine,
-            // but still honored.)
-            // OpenRouter mode: the read-only git allowlist is supplied as a
-            // Policy Engine TOML in the bridge's gemini HOME, so here we only
-            // select default approval (non-allowed tools -> deny headless) and
-            // skip the folder-trust prompt. Native mode keeps the legacy
-            // `--allowed-tools` flags (a pre-0.46 path; the Policy Engine is
-            // only wired for the OpenRouter leg's throwaway HOME).
-            Agent::Gemini if openrouter => vec!["--skip-trust", "--approval-mode", "default"],
-            Agent::Gemini => vec![
-                "--allowed-tools",
-                "run_shell_command(git diff)",
-                "--allowed-tools",
-                "run_shell_command(git log)",
-                "--allowed-tools",
-                "run_shell_command(git show)",
-                "--allowed-tools",
-                "run_shell_command(git status)",
-            ],
+            // Read-only: default approval denies tools that need it (shell,
+            // edits) in a headless session, while file reads still work; also
+            // skip the folder-trust prompt.
+            Agent::Gemini => vec!["--skip-trust", "--approval-mode", "default"],
         }
     }
 
