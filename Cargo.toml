@@ -1,6 +1,8 @@
 [package]
+# Placeholder: the real version is injected from the git tag at release build
+# time via POSTMORTEM_VERSION (see .github/workflows/release.yml and main.rs).
 name = "postmortemthis"
-version = "0.1.1"
+version = "0.0.0-dev"
 edition = "2024"
 description = "One last look before you ship. Runs every AI agent CLI you have on your diff and synthesizes the verdict."
 license = "MIT"

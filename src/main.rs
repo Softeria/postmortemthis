@@ -12,10 +12,17 @@ use runner::Outcome;
 use std::io::Read;
 use std::time::Duration;
 
+/// Version reported by `--version`: the git tag baked in at release build
+/// time (POSTMORTEM_VERSION), or the Cargo.toml placeholder for dev builds.
+const VERSION: &str = match option_env!("POSTMORTEM_VERSION") {
+    Some(v) => v,
+    None => env!("CARGO_PKG_VERSION"),
+};
+
 /// Run the AI agent CLIs you have, in parallel, on one prompt, and print each
 /// one's output. The prompt is read from stdin; the caller decides what it says.
 #[derive(Parser)]
-#[command(name = "postmortem", version, about)]
+#[command(name = "postmortem", version = VERSION, about)]
 struct Cli {
     #[command(subcommand)]
     command: Option<Cmd>,
