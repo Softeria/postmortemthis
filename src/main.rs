@@ -53,6 +53,11 @@ struct RunArgs {
     #[arg(long, value_delimiter = ',')]
     agents: Vec<String>,
 
+    /// Update the agent CLIs to their latest versions (gg update -u) before
+    /// running. gg does this in parallel; a no-op if no gg is present.
+    #[arg(long)]
+    update: bool,
+
     /// Per-agent timeout in seconds.
     #[arg(long, default_value_t = 600)]
     timeout: u64,
@@ -97,6 +102,17 @@ fn run(args: RunArgs) -> Result<()> {
     let selected = select_agents(&args.agents)?;
     let cwd = std::env::current_dir()?;
     let timeout = Duration::from_secs(args.timeout);
+
+    if args.update
+        && let Some(gg) = gg::locate()
+    {
+        eprintln!("postmortem: updating agent tools (gg update -u)...");
+        let _ = gg
+            .update_all()
+            .current_dir(&cwd)
+            .stdout(std::process::Stdio::null())
+            .status();
+    }
 
     let _bridge = start_gemini_bridge(&selected);
 
@@ -281,8 +297,9 @@ panel review, or says "postmortem this". It should:
 1. Compose a review prompt describing what to look at and what to report. For
    pending changes, tell the agents to inspect the diff with their own tools
    (each agent runs read-only).
-2. Pipe that prompt to the tool, in the repo:
-       echo "<your prompt>" | postmortem --timeout 600
+2. Pipe that prompt to the tool, in the repo, and always pass --update (the
+   agents update in parallel and postmortem runs rarely, so keep them current):
+       echo "<your prompt>" | postmortem --update --timeout 600
    (Use `./postmortemthis.cmd` instead if `postmortem` is not on PATH; it
    bootstraps the binary and any missing agent CLIs on first run.) Agents the
    user is logged into run on their own accounts; the rest use
