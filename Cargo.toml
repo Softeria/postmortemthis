@@ -1,0 +1,25 @@
+# gemshim is a workspace member, not a dependency: it's a separate binary the
+# launcher spawns. Keeping it out-of-tree from the `postmortem` package keeps
+# the launcher's dependency set tiny (no tokio/axum/reqwest) - those live only
+# in gemshim and only build when the Gemini-on-OpenRouter leg is wanted.
+[workspace]
+members = ["gemshim"]
+
+[package]
+name = "postmortemthis"
+version = "0.1.0"
+edition = "2024"
+description = "One last look before you ship. Runs every AI agent CLI you have on your diff and synthesizes the verdict."
+license = "MIT"
+
+[[bin]]
+name = "postmortem"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+wait-timeout = "0.2"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"

@@ -1,0 +1,48 @@
+name: release
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  binaries:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - os: macos-latest
+            target: aarch64-apple-darwin
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - run: cargo build --release --workspace --target ${{ matrix.target }}
+      - name: Stage binaries
+        shell: bash
+        run: |
+          mkdir dist
+          ext=""
+          [ "${{ runner.os }}" = "Windows" ] && ext=".exe"
+          for bin in postmortem gemshim; do
+            cp "target/${{ matrix.target }}/release/${bin}${ext}" \
+               "dist/${bin}-${{ matrix.target }}${ext}"
+          done
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+
+  bootstrap:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: postmortemthis.cmd
