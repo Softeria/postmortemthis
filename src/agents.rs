@@ -212,12 +212,14 @@ impl Agent {
             .unwrap_or_else(|| self.name().to_string())
     }
 
-    /// How to reach this agent: native CLI first, gg fallback.
+    /// How to reach this agent: through gg if a capable gg is available
+    /// (it owns version management and bootstrapping), else a native CLI on
+    /// PATH as a fallback.
     pub fn via(&self) -> Option<Via> {
-        if self.native_version().is_some() {
-            Some(Via::Native)
-        } else if gg::locate().is_some() {
+        if gg::locate().is_some() {
             Some(Via::Gg)
+        } else if self.native_version().is_some() {
+            Some(Via::Native)
         } else {
             None
         }

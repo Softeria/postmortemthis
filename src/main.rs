@@ -22,7 +22,7 @@ const VERSION: &str = match option_env!("POSTMORTEM_VERSION") {
 /// Run the AI agent CLIs you have, in parallel, on one prompt, and print each
 /// one's output. The prompt is read from stdin; the caller decides what it says.
 #[derive(Parser)]
-#[command(name = "postmortem", version = VERSION, about)]
+#[command(name = "postmortem", version = VERSION, about, args_conflicts_with_subcommands = true)]
 struct Cli {
     #[command(subcommand)]
     command: Option<Cmd>,
@@ -46,6 +46,9 @@ enum Cmd {
 
 #[derive(clap::Args, Default)]
 struct RunArgs {
+    /// Prompt sent to every agent. If omitted, it is read from stdin.
+    prompt: Option<String>,
+
     /// Comma-separated agents to run (default: all available).
     #[arg(long, value_delimiter = ',')]
     agents: Vec<String>,
@@ -79,10 +82,16 @@ fn main() -> Result<()> {
 fn run(args: RunArgs) -> Result<()> {
     openrouter::init(args.key.as_deref());
 
-    let mut prompt = String::new();
-    let _ = std::io::stdin().read_to_string(&mut prompt);
+    let prompt = match args.prompt {
+        Some(p) => p,
+        None => {
+            let mut s = String::new();
+            let _ = std::io::stdin().read_to_string(&mut s);
+            s
+        }
+    };
     if prompt.trim().is_empty() {
-        bail!("no prompt on stdin (pipe one in, e.g. `echo '...' | postmortem`)");
+        bail!("no prompt (pass it as an argument or pipe it on stdin)");
     }
 
     let selected = select_agents(&args.agents)?;
