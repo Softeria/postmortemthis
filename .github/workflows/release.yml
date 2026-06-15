@@ -24,17 +24,15 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
-      - run: cargo build --release --workspace --target ${{ matrix.target }}
-      - name: Stage binaries
+      - run: cargo build --release --target ${{ matrix.target }}
+      - name: Stage binary
         shell: bash
         run: |
           mkdir dist
           ext=""
           [ "${{ runner.os }}" = "Windows" ] && ext=".exe"
-          for bin in postmortem gemshim; do
-            cp "target/${{ matrix.target }}/release/${bin}${ext}" \
-               "dist/${bin}-${{ matrix.target }}${ext}"
-          done
+          cp "target/${{ matrix.target }}/release/postmortem${ext}" \
+             "dist/postmortem-${{ matrix.target }}${ext}"
       - uses: softprops/action-gh-release@v2
         with:
           files: dist/*
