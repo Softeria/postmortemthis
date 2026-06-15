@@ -1,0 +1,30 @@
+[package]
+# Placeholder: the real version is injected from the git tag at release build
+# time via POSTMORTEM_VERSION (see .github/workflows/release.yml and main.rs).
+name = "postmortemthis"
+version = "0.0.0-dev"
+edition = "2024"
+description = "One last look before you ship. Runs every AI agent CLI you have on your diff and synthesizes the verdict."
+license = "MIT"
+
+[[bin]]
+name = "postmortem"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+wait-timeout = "0.2"
+# Used only by the hidden `__gemshim` bridge subcommand. The normal launcher
+# path never starts a runtime; tokio spins up only when that subcommand runs.
+tokio = { version = "1", features = ["rt-multi-thread", "net", "time"] }
+axum = "0.7"
+reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
+serde_json = "1"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[profile.release]
+strip = true
+lto = true
