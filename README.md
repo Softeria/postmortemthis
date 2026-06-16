@@ -16,32 +16,31 @@ not "autopilot."
 
 Paste this into Claude Code:
 
-> From the latest release at github.com/Softeria/postmortemthis, download the
-> `postmortem` binary for my OS and `postmortemthis.cmd` into a folder on my
-> PATH, make `postmortem` executable, then run `postmortem skill` and follow the
-> instructions it prints.
+> Create a postmortem review skill: download
+> https://github.com/Softeria/postmortemthis/releases/latest/download/postmortemthis.cmd
+> and run `sh postmortemthis.cmd skill`, then do what it prints.
 
-That builds a **postmortem** skill. From then on, before a commit, just say:
-**"postmortem this."**
+That one file bootstraps everything - the tool itself and any agent CLIs you
+don't have - and builds a **postmortem** skill. From then on, before a commit,
+just say: **"postmortem this."**
 
 ## Auth
 
 Each agent uses your own login when it has one. For the rest, connect OpenRouter
-once - `postmortem login` (OAuth, no key to copy) or set `OPENROUTER_API_KEY` -
-and they run through it. OpenRouter usage bills to your account; this tool
-resells nothing.
+once - `sh postmortemthis.cmd login` (OAuth, no key to copy) or set
+`OPENROUTER_API_KEY` - and they run through it. OpenRouter usage bills to your
+account; this tool resells nothing.
 
 ## CLI
 
 ```
-echo "review the pending diff for bugs" | postmortem   # all available agents
-postmortem doctor                                       # what's available
-postmortem login                                        # connect OpenRouter
+echo "review the pending diff for bugs" | sh postmortemthis.cmd   # all agents
+sh postmortemthis.cmd doctor                                      # what's available
+sh postmortemthis.cmd login                                       # connect OpenRouter
 ```
 
 The prompt is read from stdin; agents run read-only in the current directory.
-`--out <dir>` also writes each agent's full output to a file. `postmortemthis.cmd`
-sits alongside the binary so it can bootstrap any agent CLI you don't have.
+`--out <dir>` also writes each agent's full output to a file.
 
 ## Build
 
