@@ -29,7 +29,7 @@ pub fn key() -> Option<&'static str> {
     KEY.get().and_then(Option::as_deref)
 }
 
-fn key_file_path() -> Option<std::path::PathBuf> {
+pub fn key_file_path() -> Option<std::path::PathBuf> {
     let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE"))?;
     Some(
         std::path::PathBuf::from(home)

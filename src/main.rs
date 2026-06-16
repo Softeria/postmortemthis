@@ -2,6 +2,7 @@ mod agents;
 mod gemshim;
 mod gemshim_server;
 mod gg;
+mod login;
 mod openrouter;
 mod runner;
 mod vibe;
@@ -35,6 +36,9 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Cmd {
+    /// Connect an OpenRouter account via OAuth and save the key locally, so
+    /// runs need no OPENROUTER_API_KEY env var or --key flag.
+    Login,
     /// Show which agent CLIs are installed and authenticated.
     Doctor,
     /// Print instructions for an AI agent to build a Claude Code skill that
@@ -79,6 +83,7 @@ struct RunArgs {
 fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
+        Some(Cmd::Login) => login::run(),
         Some(Cmd::Doctor) => doctor(),
         Some(Cmd::Skill) => {
             print!("{SKILL_INSTRUCTIONS}");
