@@ -409,8 +409,9 @@ panel review, or says "postmortem this". It should:
 2. Pipe that prompt to the tool, in the repo, and always pass --update (the
    agents update in parallel and postmortem runs rarely, so keep them current):
        echo "<your prompt>" | postmortem --update --timeout 600
-   (Use `./postmortemthis.cmd` instead if `postmortem` is not on PATH; it
-   bootstraps the binary and any missing agent CLIs on first run.) Each agent
+   (If `postmortem` is not on PATH, call it by its full path. Keep
+   `postmortemthis.cmd` next to it or on PATH; it bootstraps any missing agent
+   CLIs - it does not run the binary itself.) Each agent
    runs on the user's own login first; if that login fails or is missing and
    OPENROUTER_API_KEY is set, it falls back to OpenRouter. An agent with no
    working login and no key is skipped.
