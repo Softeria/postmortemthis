@@ -61,6 +61,12 @@ impl Agent {
         }
     }
 
+    /// Does this agent take the prompt on stdin? All do except vibe, which
+    /// wants it as a command-line argument (appended by the runner).
+    pub fn reads_stdin(&self) -> bool {
+        !matches!(self, Agent::Vibe)
+    }
+
     /// The tool name in gg's registry (gemini's binary is `gemini`, but the
     /// gg tool is `gemini-cli`).
     pub fn gg_tool(&self) -> &'static str {
@@ -152,11 +158,12 @@ impl Agent {
             // (the OPENAI_* env points that at OpenRouter); the prompt is read
             // from stdin like the others.
             Agent::Qwen => vec!["--approval-mode", "default", "--auth-type", "openai"],
-            // -p: programmatic mode (prompt on stdin, print, exit). The `plan`
-            // builtin agent is read-only (no edits); --trust skips the
-            // folder-trust prompt for non-interactive use. Provider/model come
-            // from the scratch VIBE_HOME (see vibe.rs).
-            Agent::Vibe => vec!["-p", "--agent", "plan", "--trust", "--output", "text"],
+            // -p: programmatic mode (print, exit). Unlike the others, vibe does
+            // not take the prompt on stdin - it wants it as -p's value, so -p
+            // goes last and the runner appends the prompt (see reads_stdin).
+            // The `plan` builtin agent is read-only (no edits); --trust skips
+            // the folder-trust prompt. Provider/model come from VIBE_HOME.
+            Agent::Vibe => vec!["--agent", "plan", "--trust", "--output", "text", "-p"],
         }
     }
 

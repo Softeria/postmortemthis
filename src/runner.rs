@@ -144,7 +144,13 @@ fn run_attempt(
 ) -> Report {
     let started = Instant::now();
     let mut cmd = agent.command(repo, openrouter);
-    cmd.stdin(Stdio::piped())
+    // Most agents read the prompt on stdin; the rest (vibe) take it as a
+    // trailing argument and get no stdin.
+    let on_stdin = agent.reads_stdin();
+    if !on_stdin {
+        cmd.arg(prompt);
+    }
+    cmd.stdin(if on_stdin { Stdio::piped() } else { Stdio::null() })
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     // Own process group, so a timeout can kill the whole tree.
@@ -166,14 +172,15 @@ fn run_attempt(
         }
     };
 
-    // Feed the prompt on a thread; a write error just means the agent died
-    // before reading it, which the exit status will report. Dropping the
-    // handle closes the pipe so the agent sees EOF.
-    let mut stdin_pipe = child.stdin.take().expect("stdin piped");
-    let prompt_owned = prompt.to_string();
-    std::thread::spawn(move || {
-        let _ = stdin_pipe.write_all(prompt_owned.as_bytes());
-    });
+    // Feed the prompt on a thread when the agent reads stdin; a write error
+    // just means the agent died before reading it, which the exit status will
+    // report. Dropping the handle closes the pipe so the agent sees EOF.
+    if on_stdin && let Some(mut stdin_pipe) = child.stdin.take() {
+        let prompt_owned = prompt.to_string();
+        std::thread::spawn(move || {
+            let _ = stdin_pipe.write_all(prompt_owned.as_bytes());
+        });
+    }
 
     let out_rx = drain(child.stdout.take().expect("stdout piped"));
     let err_rx = drain(child.stderr.take().expect("stderr piped"));
