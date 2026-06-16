@@ -1,0 +1,142 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 668" font-family="-apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0b1220"/><stop offset="1" stop-color="#090d18"/>
+    </linearGradient>
+    <radialGradient id="claudeglow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#d97757" stop-opacity="0.22"/><stop offset="1" stop-color="#d97757" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="gem" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#5b9dff"/><stop offset="1" stop-color="#1a73e8"/>
+    </linearGradient>
+    <linearGradient id="mistral" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffd21e"/><stop offset="0.5" stop-color="#ff7a00"/><stop offset="1" stop-color="#f7344e"/>
+    </linearGradient>
+    <filter id="ds" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="3" stdDeviation="7" flood-color="#000000" flood-opacity="0.45"/>
+    </filter>
+  </defs>
+
+  <rect x="0.5" y="0.5" width="1279" height="667" rx="26" fill="url(#bg)" stroke="#1b2740"/>
+
+  <!-- header -->
+  <text x="64" y="60" font-size="30" font-weight="800" fill="#f8fafc">postmortem<tspan fill="#34d399">this</tspan></text>
+  <text x="64" y="106" font-size="30" font-weight="800" fill="#f1f5f9">Every coding agent you have. <tspan fill="#34d399">One verdict.</tspan></text>
+
+  <g transform="translate(0,-52)">
+  <!-- you say -->
+  <g filter="url(#ds)">
+    <rect x="56" y="372" width="150" height="84" rx="16" fill="#111b2e" stroke="#283750"/>
+    <path d="M206,406 L220,414 L206,422 Z" fill="#111b2e" stroke="#283750"/>
+  </g>
+  <text x="131" y="404" text-anchor="middle" font-size="12" fill="#64748b">you say</text>
+  <text x="131" y="430" text-anchor="middle" font-size="16" font-weight="700" fill="#e2e8f0">"<tspan fill="#34d399">postmortem this</tspan>"</text>
+  <path d="M222,414 L250,414" stroke="#34d399" stroke-width="2.5" fill="none"/>
+  <path d="M248,408 L260,414 L248,420 Z" fill="#34d399"/>
+
+  <!-- ===== Claude Code hub (the actor) ===== -->
+  <circle cx="362" cy="414" r="150" fill="url(#claudeglow)"/>
+  <g filter="url(#ds)">
+    <rect x="262" y="330" width="200" height="172" rx="20" fill="#16110c" stroke="#d97757"/>
+  </g>
+  <g transform="translate(362,378)" fill="#d97757">
+    <g><rect x="-1.7" y="-19" width="3.4" height="15" rx="1.7"/></g>
+    <g transform="rotate(30)"><rect x="-1.7" y="-19" width="3.4" height="15" rx="1.7"/></g>
+    <g transform="rotate(60)"><rect x="-1.7" y="-19" width="3.4" height="15" rx="1.7"/></g>
+    <g transform="rotate(90)"><rect x="-1.7" y="-19" width="3.4" height="15" rx="1.7"/></g>
+    <g transform="rotate(120)"><rect x="-1.7" y="-19" width="3.4" height="15" rx="1.7"/></g>
+    <g transform="rotate(150)"><rect x="-1.7" y="-19" width="3.4" height="15" rx="1.7"/></g>
+    <g transform="rotate(180)"><rect x="-1.7" y="-19" width="3.4" height="15" rx="1.7"/></g>
+    <g transform="rotate(210)"><rect x="-1.7" y="-19" width="3.4" height="15" rx="1.7"/></g>
+    <g transform="rotate(240)"><rect x="-1.7" y="-19" width="3.4" height="15" rx="1.7"/></g>
+    <g transform="rotate(270)"><rect x="-1.7" y="-19" width="3.4" height="15" rx="1.7"/></g>
+    <g transform="rotate(300)"><rect x="-1.7" y="-19" width="3.4" height="15" rx="1.7"/></g>
+    <g transform="rotate(330)"><rect x="-1.7" y="-19" width="3.4" height="15" rx="1.7"/></g>
+  </g>
+  <text x="362" y="430" text-anchor="middle" font-size="19" font-weight="800" fill="#f8fafc">Claude Code</text>
+  <text x="362" y="451" text-anchor="middle" font-size="12" fill="#cbb3a6">the agent you're working in</text>
+  <text x="362" y="481" text-anchor="middle" font-size="12.5" font-weight="700" fill="#34d399">runs the panel, makes the call</text>
+
+  <!-- hub <-> tool arrows -->
+  <g fill="none" stroke="#34d399" stroke-linecap="round">
+    <path d="M462,388 C500,388 500,360 536,360" stroke-width="2" opacity="0.2"/>
+    <path d="M462,388 C500,388 500,360 536,360" stroke-width="2" stroke-dasharray="5 14"><animate attributeName="stroke-dashoffset" from="38" to="0" dur="1.3s" repeatCount="indefinite"/></path>
+    <path d="M536,468 C500,468 500,440 464,440" stroke-width="2" opacity="0.2"/>
+    <path d="M536,468 C500,468 500,440 464,440" stroke-width="2" stroke-dasharray="5 14"><animate attributeName="stroke-dashoffset" from="0" to="38" dur="1.3s" repeatCount="indefinite"/></path>
+  </g>
+  <path d="M530,357 L542,362 L531,369 Z" fill="#34d399"/>
+  <path d="M470,435 L458,440 L469,447 Z" fill="#34d399"/>
+  <text x="500" y="338" text-anchor="middle" font-size="11" fill="#7e8ca6">runs them</text>
+  <text x="500" y="492" text-anchor="middle" font-size="11" fill="#7e8ca6">takes come back</text>
+
+  <!-- ===== postmortemthis tool container ===== -->
+  <rect x="540" y="212" width="700" height="404" rx="20" fill="#0a1322" stroke="#243352"/>
+  <text x="564" y="246" font-size="16" font-weight="800" fill="#e2e8f0">postmortemthis<tspan font-size="12" font-weight="400" fill="#7e8ca6">  the CLI Claude Code runs</tspan></text>
+  <text x="564" y="266" font-size="11" fill="#5b6b85" letter-spacing="1.2">EVERY AGENT CLI  /  OWN TOOLS  /  OWN MODEL  /  READ-ONLY  /  IN PARALLEL</text>
+
+  <!-- agent pills inside the tool -->
+  <!-- Claude (yes, itself too) -->
+  <rect x="566" y="288" width="648" height="52" rx="12" fill="#111b2e" stroke="#283750"/>
+  <rect x="578" y="294" width="40" height="40" rx="11" fill="#16110c" stroke="#d97757" stroke-opacity="0.5"/>
+  <g transform="translate(598,314) scale(0.8)" fill="#d97757">
+    <g><rect x="-1.4" y="-16" width="2.8" height="13" rx="1.4"/></g><g transform="rotate(45)"><rect x="-1.4" y="-16" width="2.8" height="13" rx="1.4"/></g><g transform="rotate(90)"><rect x="-1.4" y="-16" width="2.8" height="13" rx="1.4"/></g><g transform="rotate(135)"><rect x="-1.4" y="-16" width="2.8" height="13" rx="1.4"/></g><g transform="rotate(180)"><rect x="-1.4" y="-16" width="2.8" height="13" rx="1.4"/></g><g transform="rotate(225)"><rect x="-1.4" y="-16" width="2.8" height="13" rx="1.4"/></g><g transform="rotate(270)"><rect x="-1.4" y="-16" width="2.8" height="13" rx="1.4"/></g><g transform="rotate(315)"><rect x="-1.4" y="-16" width="2.8" height="13" rx="1.4"/></g>
+  </g>
+  <text x="632" y="312" font-size="15.5" font-weight="700" fill="#f1f5f9">Claude Code</text>
+  <text x="632" y="328" font-size="11" fill="#8da0bb">on the panel too</text>
+  <rect x="1086" y="302" width="116" height="24" rx="12" fill="#1c140f" stroke="#d97757" stroke-opacity="0.4"/>
+  <text x="1144" y="318" text-anchor="middle" font-size="12" fill="#e8b9a3">Claude Opus</text>
+
+  <!-- Codex -->
+  <rect x="566" y="350" width="648" height="52" rx="12" fill="#111b2e" stroke="#283750"/>
+  <rect x="578" y="356" width="40" height="40" rx="11" fill="#0a1512" stroke="#10a37f" stroke-opacity="0.5"/>
+  <g transform="translate(598,376) scale(0.8)" fill="none" stroke="#10a37f" stroke-width="2.4">
+    <ellipse cx="0" cy="-8.5" rx="4.4" ry="10.5"/><ellipse cx="0" cy="-8.5" rx="4.4" ry="10.5" transform="rotate(60)"/><ellipse cx="0" cy="-8.5" rx="4.4" ry="10.5" transform="rotate(120)"/><ellipse cx="0" cy="-8.5" rx="4.4" ry="10.5" transform="rotate(180)"/><ellipse cx="0" cy="-8.5" rx="4.4" ry="10.5" transform="rotate(240)"/><ellipse cx="0" cy="-8.5" rx="4.4" ry="10.5" transform="rotate(300)"/>
+  </g>
+  <text x="632" y="374" font-size="15.5" font-weight="700" fill="#f1f5f9">Codex</text>
+  <text x="632" y="390" font-size="11" fill="#8da0bb">OpenAI</text>
+  <rect x="1110" y="364" width="92" height="24" rx="12" fill="#0d1714" stroke="#10a37f" stroke-opacity="0.4"/>
+  <text x="1156" y="380" text-anchor="middle" font-size="12" fill="#7fe3c8">GPT-5</text>
+
+  <!-- Gemini -->
+  <rect x="566" y="412" width="648" height="52" rx="12" fill="#111b2e" stroke="#283750"/>
+  <rect x="578" y="418" width="40" height="40" rx="11" fill="#0a1020" stroke="#4285f4" stroke-opacity="0.5"/>
+  <path transform="translate(598,438) scale(0.8)" d="M0,-17 Q3,-3 17,0 Q3,3 0,17 Q-3,3 -17,0 Q-3,-3 0,-17 Z" fill="url(#gem)"/>
+  <text x="632" y="436" font-size="15.5" font-weight="700" fill="#f1f5f9">Gemini CLI</text>
+  <text x="632" y="452" font-size="11" fill="#8da0bb">Google</text>
+  <rect x="1086" y="426" width="116" height="24" rx="12" fill="#0c1322" stroke="#4285f4" stroke-opacity="0.4"/>
+  <text x="1144" y="442" text-anchor="middle" font-size="12" fill="#9dc1fb">Gemini 3 Pro</text>
+
+  <!-- Qwen -->
+  <rect x="566" y="474" width="648" height="52" rx="12" fill="#111b2e" stroke="#283750"/>
+  <rect x="578" y="480" width="40" height="40" rx="11" fill="#0f0a20" stroke="#7c5cff" stroke-opacity="0.5"/>
+  <g transform="translate(598,500) scale(0.8)" fill="none" stroke="#a78bfa" stroke-width="2.4" stroke-linejoin="round">
+    <path d="M0,-15 L13,-7.5 L13,7.5 L0,15 L-13,7.5 L-13,-7.5 Z"/><path d="M0,-7.5 L6.5,-3.7 L6.5,3.7 L0,7.5 L-6.5,3.7 L-6.5,-3.7 Z"/>
+  </g>
+  <text x="632" y="498" font-size="15.5" font-weight="700" fill="#f1f5f9">Qwen Code</text>
+  <text x="632" y="514" font-size="11" fill="#8da0bb">Alibaba</text>
+  <rect x="1086" y="488" width="116" height="24" rx="12" fill="#130d22" stroke="#7c5cff" stroke-opacity="0.4"/>
+  <text x="1144" y="504" text-anchor="middle" font-size="12" fill="#c4b5fd">Qwen3 Coder</text>
+
+  <!-- Vibe -->
+  <rect x="566" y="536" width="648" height="52" rx="12" fill="#111b2e" stroke="#283750"/>
+  <rect x="578" y="542" width="40" height="40" rx="11" fill="#1a0f06" stroke="#ff7000" stroke-opacity="0.5"/>
+  <path transform="translate(598,562) scale(0.8)" d="M-14,14 L-14,-14 L-6,-14 L0,-3 L6,-14 L14,-14 L14,14 L7,14 L7,-3 L0,8 L-7,-3 L-7,14 Z" fill="url(#mistral)"/>
+  <text x="632" y="560" font-size="15.5" font-weight="700" fill="#f1f5f9">Vibe</text>
+  <text x="632" y="576" font-size="11" fill="#8da0bb">Mistral</text>
+  <rect x="1078" y="550" width="124" height="24" rx="12" fill="#1a1207" stroke="#ff7000" stroke-opacity="0.4"/>
+  <text x="1140" y="566" text-anchor="middle" font-size="12" fill="#ffc08a">Mistral Medium</text>
+
+  <!-- Claude Code's call -->
+  <path d="M362,502 L362,536" stroke="#34d399" stroke-width="2.5" fill="none"/>
+  <path d="M356,534 L362,546 L368,534 Z" fill="#34d399"/>
+  <text x="362" y="566" text-anchor="middle" font-size="12" fill="#93a4bd">Claude Code's call</text>
+  <rect x="277" y="576" width="170" height="34" rx="10" fill="#06281e" stroke="#34d399"/>
+  <text x="362" y="599" text-anchor="middle" font-size="15" font-weight="700" fill="#34d399">ship</text>
+  <rect x="277" y="618" width="170" height="34" rx="10" fill="#2a0a0a" stroke="#f87171"/>
+  <text x="362" y="641" text-anchor="middle" font-size="15" font-weight="700" fill="#f87171">don't ship</text>
+
+  <!-- footer -->
+  <line x1="64" y1="676" x2="1216" y2="676" stroke="#1b2740"/>
+  <text x="64" y="702" font-size="13.5" fill="#93a4bd">Uses your own logins where you have them; one OpenRouter key fills the rest. Runs read-only, holds no keys, and changes nothing.</text>
+  </g>
+</svg>
