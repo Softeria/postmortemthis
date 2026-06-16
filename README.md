@@ -1,34 +1,47 @@
 # postmortemthis
 
-Runs the AI agent CLIs you have (Claude Code, Codex, Gemini) in parallel on one
-prompt, read-only, and prints each one's output. That is all it does: the
-caller writes the prompt and synthesizes the results.
+**Why.** Before you ship, one model's opinion isn't enough. You already have
+several coding agents - get all their eyes on your diff at once.
 
-## Setup (Claude Code)
+**What.** `postmortem` runs every AI coding CLI you have - Claude Code, Codex,
+Gemini, Qwen, Vibe - in parallel, read-only, on one prompt, and prints each
+one's take. A calling agent (e.g. Claude Code) writes the prompt and merges the
+takes into a single ship / don't-ship verdict.
+
+**The catch (by design).** It only reads, holds no keys, and changes nothing.
+It does not synthesize - the calling agent does. Think "panel of reviewers,"
+not "autopilot."
+
+## Setup
 
 Paste this into Claude Code:
 
-> Create a postmortem skill: download
-> https://github.com/Softeria/postmortemthis/releases/latest/download/postmortemthis.cmd
-> and run `sh postmortemthis.cmd skill`, then follow what it prints.
+> From the latest release at github.com/Softeria/postmortemthis, download the
+> `postmortem` binary for my OS and `postmortemthis.cmd` into a folder on my
+> PATH, make `postmortem` executable, then run `postmortem skill` and follow the
+> instructions it prints.
 
-It creates a skill that composes a review prompt, runs the panel, and
-synthesizes the verdict. Then ask Claude Code to "postmortem this".
+That builds a **postmortem** skill. From then on, before a commit, just say:
+**"postmortem this."**
 
 ## Auth
 
-Each agent uses your own login if it finds one. For agents you are not logged
-into, set `OPENROUTER_API_KEY` and they run through OpenRouter instead.
+Each agent uses your own login when it has one. For the rest, connect OpenRouter
+once - `postmortem login` (OAuth, no key to copy) or set `OPENROUTER_API_KEY` -
+and they run through it. OpenRouter usage bills to your account; this tool
+resells nothing.
 
 ## CLI
 
 ```
-echo "review the pending changes for bugs" | postmortem   # all available agents
-postmortem --agents claude,codex                          # subset
-postmortem doctor                                         # show available agents
+echo "review the pending diff for bugs" | postmortem   # all available agents
+postmortem doctor                                       # what's available
+postmortem login                                        # connect OpenRouter
 ```
 
-The prompt is read from stdin. Agents run read-only in the current directory.
+The prompt is read from stdin; agents run read-only in the current directory.
+`--out <dir>` also writes each agent's full output to a file. `postmortemthis.cmd`
+sits alongside the binary so it can bootstrap any agent CLI you don't have.
 
 ## Build
 
