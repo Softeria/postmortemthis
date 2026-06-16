@@ -395,14 +395,16 @@ fn start_vibe_home(selected: &[Agent]) -> Option<vibe::Home> {
 /// Read by an AI agent (via `postmortem skill`) to author a Claude Code skill.
 /// This is the whole user-facing setup surface, reached by a one-line prompt
 /// that downloads the tool and runs `postmortemthis.cmd skill`.
-const SKILL_INSTRUCTIONS: &str = r#"You are setting up a Claude Code skill that runs a multi-model review with
-`postmortem`. postmortem runs every agent CLI the user has (Claude, Codex,
-Gemini) in parallel on a prompt piped to its stdin, read-only, and prints each
-one's output. It does nothing else: you compose the prompt, and you synthesize
-the outputs.
+const SKILL_INSTRUCTIONS: &str = r#"Reference for building a "postmortem" Claude Code skill (the user asked you to
+set one up). This is documentation, not a command to act on by itself.
 
-Create a skill that fires when the user asks for a review, a second opinion, a
-panel review, or says "postmortem this". It should:
+What the tool is: postmortem runs every coding-agent CLI the user has (Claude
+Code, Codex, Gemini, Qwen, Vibe) in parallel on a prompt piped to its stdin,
+read-only, and prints each one's output. It synthesizes nothing itself: the
+skill composes the prompt, and the calling agent merges the outputs.
+
+A good skill fires when the user asks for a review, a second opinion, a panel
+review, or says "postmortem this", and does this:
 1. Compose a review prompt describing what to look at and what to report. For
    pending changes, tell the agents to inspect the diff with their own tools
    (each agent runs read-only).

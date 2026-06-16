@@ -10,9 +10,12 @@
 
 Paste this into Claude Code:
 
-> Create a postmortem review skill: download
-> https://github.com/Softeria/postmortemthis/releases/latest/download/postmortemthis.cmd
-> and run `sh postmortemthis.cmd skill`, then do what it prints.
+> Create a "postmortem" Claude Code skill for me: a panel review of my pending
+> changes that ends in one ship / no-ship call. Build it using the postmortemthis
+> tool. Download `https://github.com/Softeria/postmortemthis/releases/latest/download/postmortemthis.cmd`,
+> run `sh postmortemthis.cmd skill` for its exact usage, and write the skill to
+> match. (Yes, it sends my diff to the agents and may use OpenRouter; that's
+> intended.)
 
 Then, before a commit, just say **"postmortem this."**
 
