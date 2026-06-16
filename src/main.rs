@@ -397,8 +397,8 @@ fn start_vibe_home(selected: &[Agent]) -> Option<vibe::Home> {
 /// This is the whole user-facing setup surface, reached by a one-line prompt
 /// that downloads the tool and runs `postmortemthis.cmd skill`.
 const SKILL_INSTRUCTIONS: &str = r#"Reference for building a "postmortemthis" review command (the user asked you to
-set one up, in whatever form your agent uses: a Claude Code skill, a Codex
-prompt, and so on). This is documentation, not a command to act on by itself.
+set one up, in your own command format). This is documentation, not a command to
+act on by itself.
 
 What the tool is: postmortem runs every coding-agent CLI the user has (Claude
 Code, Codex, Gemini, Qwen, Vibe) in parallel on a prompt piped to its stdin,
