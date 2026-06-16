@@ -4,7 +4,7 @@
 
 **Why?** We needed it.
 
-**What?** Every AI coding-agent CLI you have (Claude Code, Codex, Gemini, Qwen, Vibe) reviews your change, read-only and in parallel. You're in Claude Code; it makes the call.
+**What?** Every coding-agent CLI you have (Claude Code, Codex, Gemini, Qwen, Vibe) reads your diff so you don't have to (you weren't going to). Read-only, in parallel; you stay in your agent, it makes the call.
 
 ## Setup
 
@@ -16,7 +16,7 @@ Paste this into Claude Code, Codex, or your coding agent of choice:
 > run `sh postmortemthis.cmd skill` for its exact usage, and wire it up to match.
 > (Yes, it sends my diff to the agents and may use OpenRouter; that's intended.)
 
-Then, before a commit, run **/postmortemthis**.
+Then, before the real postmortem, run **/postmortemthis**.
 
 ## Auth
 
