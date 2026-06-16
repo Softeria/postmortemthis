@@ -109,29 +109,40 @@ impl Agent {
         }
     }
 
-    /// Build the review command, via the native CLI or through gg.
-    /// The caller pipes the prompt to stdin.
-    pub fn command(&self, repo: &Path) -> Command {
+    /// Build the review command, via the native CLI or through gg. When
+    /// `openrouter` is set, the CLI is pointed at OpenRouter on the resolved
+    /// key; otherwise it runs on the user's own login. The caller pipes the
+    /// prompt to stdin.
+    pub fn command(&self, repo: &Path, openrouter: bool) -> Command {
         let mut cmd = match self.via() {
             Some(Via::Gg) => gg::locate().expect("via() said gg").tool(self.gg_tool()),
             // Native, or unresolved (let the spawn error surface).
             _ => Command::new(self.native_bin()),
         };
-        // OpenRouter-first: if a key is present and this agent can reach
-        // OpenRouter, route the CLI there - one key drives the whole panel
-        // uniformly, regardless of native logins. With no key, the agent runs
-        // on the user's own login (BYO).
-        let or_key = (openrouter::key().is_some() && self.openrouter_capable())
-            .then(openrouter::key)
-            .flatten();
-        cmd.args(self.args(or_key.is_some()));
+        cmd.args(self.args(openrouter));
         cmd.current_dir(repo);
-        if let Some(key) = or_key {
+        if openrouter && let Some(key) = openrouter::key() {
             for (name, value) in self.openrouter_env(key) {
                 cmd.env(name, value);
             }
         }
         cmd
+    }
+
+    /// Ordered attempts for this agent: `false` runs on the native login,
+    /// `true` runs on OpenRouter. The native login is tried first when the
+    /// user has one; OpenRouter follows as a fallback (or as the only attempt
+    /// when there is no usable login). An empty plan means there is nothing to
+    /// try - no login and no key.
+    pub fn attempt_plan(&self) -> Vec<bool> {
+        let mut plan = Vec::new();
+        if self.authed() {
+            plan.push(false);
+        }
+        if openrouter::key().is_some() && self.openrouter_capable() {
+            plan.push(true);
+        }
+        plan
     }
 
     /// Can this agent reach OpenRouter in principle? All three can: Claude via

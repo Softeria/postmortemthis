@@ -73,10 +73,64 @@ fn recv_drained(rx: &mpsc::Receiver<String>, child: &mut Child, group_killed: &m
     }
 }
 
-/// Run one agent to completion with a timeout. The prompt goes in on stdin.
+/// Run one agent, trying each path in its attempt plan in order until one
+/// succeeds: the native login first, then OpenRouter as a fallback. A failed
+/// attempt (non-zero exit) rolls on to the next; a timeout does not, since the
+/// model is likely working and a second full timeout would just double the
+/// wait. The reported elapsed time covers every attempt made.
 fn run_one(agent: Agent, prompt: &str, repo: &Path, timeout: Duration) -> Report {
     let started = Instant::now();
-    let mut cmd = agent.command(repo);
+    let plan = agent.attempt_plan();
+    if plan.is_empty() {
+        return Report {
+            agent,
+            output: String::new(),
+            stderr: String::new(),
+            elapsed: started.elapsed(),
+            outcome: Outcome::Failed("no usable login and no OpenRouter key".into()),
+        };
+    }
+    let mut last: Option<Report> = None;
+    for (i, &openrouter) in plan.iter().enumerate() {
+        let mut report = run_attempt(agent, prompt, repo, timeout, openrouter);
+        match report.outcome {
+            Outcome::Ok | Outcome::TimedOut => {
+                report.elapsed = started.elapsed();
+                return report;
+            }
+            Outcome::Failed(_) => {
+                if i + 1 < plan.len() {
+                    eprintln!(
+                        "  [{}] {} attempt failed; falling back to {}",
+                        agent.name(),
+                        mode_label(openrouter),
+                        mode_label(plan[i + 1]),
+                    );
+                }
+                last = Some(report);
+            }
+        }
+    }
+    let mut report = last.expect("attempt plan is non-empty");
+    report.elapsed = started.elapsed();
+    report
+}
+
+fn mode_label(openrouter: bool) -> &'static str {
+    if openrouter { "OpenRouter" } else { "native" }
+}
+
+/// Run a single attempt to completion with a timeout. The prompt goes in on
+/// stdin. `openrouter` selects the native-login or OpenRouter command.
+fn run_attempt(
+    agent: Agent,
+    prompt: &str,
+    repo: &Path,
+    timeout: Duration,
+    openrouter: bool,
+) -> Report {
+    let started = Instant::now();
+    let mut cmd = agent.command(repo, openrouter);
     cmd.stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());

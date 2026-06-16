@@ -159,10 +159,12 @@ fn doctor() -> Result<()> {
     }
     let mut any = false;
     for agent in agents::ALL {
-        let auth = if openrouter::key().is_some() && agent.supports_openrouter() {
-            "via OpenRouter key".to_string()
-        } else {
-            agent.auth_hint()
+        let or = openrouter::key().is_some() && agent.supports_openrouter();
+        let auth = match (agent.authed(), or) {
+            (true, true) => format!("{} (OpenRouter fallback if it fails)", agent.auth_hint()),
+            (true, false) => agent.auth_hint(),
+            (false, true) => "via OpenRouter key".to_string(),
+            (false, false) => agent.auth_hint(),
         };
         match agent.via() {
             Some(Via::Native) => {
@@ -298,10 +300,10 @@ panel review, or says "postmortem this". It should:
    agents update in parallel and postmortem runs rarely, so keep them current):
        echo "<your prompt>" | postmortem --update --timeout 600
    (Use `./postmortemthis.cmd` instead if `postmortem` is not on PATH; it
-   bootstraps the binary and any missing agent CLIs on first run.) If
-   OPENROUTER_API_KEY is set, every agent runs through OpenRouter on that one
-   key; otherwise each agent uses the user's own login and any agent with no
-   usable login is skipped.
+   bootstraps the binary and any missing agent CLIs on first run.) Each agent
+   runs on the user's own login first; if that login fails or is missing and
+   OPENROUTER_API_KEY is set, it falls back to OpenRouter. An agent with no
+   working login and no key is skipped.
 3. Read the per-agent outputs from stdout and synthesize one verdict: merge and
    deduplicate findings, weight by cross-agent consensus, drop false positives,
    rank by severity with file:line, and end with a clear ship / don't-ship call.
