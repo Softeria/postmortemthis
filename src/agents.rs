@@ -82,11 +82,24 @@ impl Agent {
             // (codex's built-in openai provider can't be repointed by env
             // alone for the Responses wire API).
             Agent::Codex => {
-                let mut a = vec!["exec"];
+                // --ignore-user-config: run a clean one-shot. The user's
+                // config.toml (MCP servers, custom tools, extra headers) is
+                // irrelevant to a read-only review and can inject malformed
+                // tool schemas that upstream providers reject. Auth still
+                // resolves from CODEX_HOME.
+                let mut a = vec!["exec", "--ignore-user-config"];
                 if openrouter {
                     a.extend_from_slice(&CODEX_OPENROUTER_ARGS);
                 }
-                a.extend_from_slice(&["--sandbox", "read-only", "-"]);
+                a.extend_from_slice(&[
+                    "--sandbox",
+                    "read-only",
+                    // Run in any directory, not just a git repo; the sandbox
+                    // already enforces read-only, so the git-trust gate is
+                    // redundant here and just blocks non-repo cwds.
+                    "--skip-git-repo-check",
+                    "-",
+                ]);
                 a
             }
             // Read-only: default approval denies tools that need it (shell,
@@ -104,10 +117,11 @@ impl Agent {
             // Native, or unresolved (let the spawn error surface).
             _ => Command::new(self.native_bin()),
         };
-        // Agents the user has native auth for run untouched (BYO mode).
-        // Otherwise, if an OpenRouter key is present and this agent can use
-        // it, point the CLI at OpenRouter on that key.
-        let or_key = (!self.authed() && self.openrouter_capable())
+        // OpenRouter-first: if a key is present and this agent can reach
+        // OpenRouter, route the CLI there - one key drives the whole panel
+        // uniformly, regardless of native logins. With no key, the agent runs
+        // on the user's own login (BYO).
+        let or_key = (openrouter::key().is_some() && self.openrouter_capable())
             .then(openrouter::key)
             .flatten();
         cmd.args(self.args(or_key.is_some()));
@@ -165,6 +179,11 @@ impl Agent {
                     vec![
                         ("HOME", home.clone()),
                         ("USERPROFILE", home),
+                        // Redirecting HOME would also move gg's tool cache
+                        // (default $HOME/.cache/gg) into the throwaway dir,
+                        // forcing a full gemini-cli reinstall on every run.
+                        // Pin it back to the real cache.
+                        ("GG_CACHE_DIR", gg_cache_dir()),
                         ("GEMINI_API_KEY", "gemshim-substitutes-the-real-key".into()),
                         ("GOOGLE_GEMINI_BASE_URL", format!("http://127.0.0.1:{port}")),
                         ("GEMINI_CLI_TRUST_WORKSPACE", "true".into()),
@@ -248,11 +267,11 @@ impl Agent {
                     || claude_keychain_auth()
             }
             Agent::Codex => exists(".codex/auth.json") || env_set("OPENAI_API_KEY"),
-            Agent::Gemini => {
-                exists(".gemini/oauth_creds.json")
-                    || env_set("GEMINI_API_KEY")
-                    || env_set("GOOGLE_API_KEY")
-            }
+            // Gemini's free Google-OAuth login (oauth_creds.json) is
+            // interactive and cannot run headless, so it does not count: only
+            // a real API key is headless-usable. Without one, an OpenRouter
+            // key routes Gemini through the gemshim bridge instead.
+            Agent::Gemini => env_set("GEMINI_API_KEY") || env_set("GOOGLE_API_KEY"),
         }
     }
 
@@ -261,8 +280,12 @@ impl Agent {
             match self {
                 Agent::Claude => "logged in (subscription or API)".into(),
                 Agent::Codex => "logged in".into(),
-                Agent::Gemini => "logged in (Google OAuth)".into(),
+                Agent::Gemini => "API key set".into(),
             }
+        } else if matches!(self, Agent::Gemini) && gemini_oauth_present() {
+            "Google OAuth login found, but it cannot run headless - set \
+             GEMINI_API_KEY or pass an OpenRouter key"
+                .into()
         } else {
             format!(
                 "no credentials found - run `{}` once to log in",
@@ -270,6 +293,32 @@ impl Agent {
             )
         }
     }
+}
+
+/// gg's tool cache, so it survives a redirected HOME on the gemini leg:
+/// `$GG_CACHE_DIR` if set, else the default `$HOME/.cache/gg`. Read while the
+/// real HOME is still in scope (the override applies only to the child).
+fn gg_cache_dir() -> String {
+    if let Some(v) = std::env::var_os("GG_CACHE_DIR") {
+        return v.to_string_lossy().into_owned();
+    }
+    let home = std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .unwrap_or_default();
+    Path::new(&home)
+        .join(".cache")
+        .join("gg")
+        .to_string_lossy()
+        .into_owned()
+}
+
+/// Is a Gemini Google-OAuth login on disk? Used only to explain that it is
+/// present but unusable headless; it is deliberately not counted by `authed`.
+fn gemini_oauth_present() -> bool {
+    let home = std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .unwrap_or_default();
+    Path::new(&home).join(".gemini/oauth_creds.json").exists()
 }
 
 /// Claude Code on macOS stores OAuth credentials in the Keychain, not in

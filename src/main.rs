@@ -159,9 +159,7 @@ fn doctor() -> Result<()> {
     }
     let mut any = false;
     for agent in agents::ALL {
-        let auth = if agent.authed() {
-            agent.auth_hint()
-        } else if openrouter::key().is_some() && agent.supports_openrouter() {
+        let auth = if openrouter::key().is_some() && agent.supports_openrouter() {
             "via OpenRouter key".to_string()
         } else {
             agent.auth_hint()
@@ -260,10 +258,9 @@ fn prewarm(selected: &[Agent], dir: &std::path::Path) {
 const GEMINI_OPENROUTER_MODEL: &str = "google/gemini-3.1-pro-preview";
 
 /// Bring up the gemshim bridge when the Gemini leg will run on OpenRouter
-/// (selected, no native Google login, key present). Held for the run.
+/// (Gemini selected and an OpenRouter key is present). Held for the run.
 fn start_gemini_bridge(selected: &[Agent]) -> Option<gemshim::Bridge> {
-    let needs_bridge =
-        selected.contains(&Agent::Gemini) && !Agent::Gemini.authed() && openrouter::key().is_some();
+    let needs_bridge = selected.contains(&Agent::Gemini) && openrouter::key().is_some();
     if !needs_bridge {
         return None;
     }
@@ -301,9 +298,10 @@ panel review, or says "postmortem this". It should:
    agents update in parallel and postmortem runs rarely, so keep them current):
        echo "<your prompt>" | postmortem --update --timeout 600
    (Use `./postmortemthis.cmd` instead if `postmortem` is not on PATH; it
-   bootstraps the binary and any missing agent CLIs on first run.) Agents the
-   user is logged into run on their own accounts; the rest use
-   OPENROUTER_API_KEY if set, else are skipped.
+   bootstraps the binary and any missing agent CLIs on first run.) If
+   OPENROUTER_API_KEY is set, every agent runs through OpenRouter on that one
+   key; otherwise each agent uses the user's own login and any agent with no
+   usable login is skipped.
 3. Read the per-agent outputs from stdout and synthesize one verdict: merge and
    deduplicate findings, weight by cross-agent consensus, drop false positives,
    rank by severity with file:line, and end with a clear ship / don't-ship call.
