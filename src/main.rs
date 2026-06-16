@@ -9,8 +9,9 @@ mod vibe;
 use agents::{Agent, Via};
 use anyhow::{Result, bail};
 use clap::{Parser, Subcommand};
-use runner::Outcome;
+use runner::{Outcome, Report};
 use std::io::Read;
+use std::path::PathBuf;
 use std::time::Duration;
 
 /// Version reported by `--version`: the git tag baked in at release build
@@ -62,6 +63,12 @@ struct RunArgs {
     /// Per-agent timeout in seconds.
     #[arg(long, default_value_t = 600)]
     timeout: u64,
+
+    /// Also write each agent's output to <DIR>/<agent>.md (untruncated) and
+    /// print the paths. Useful for large panels where the combined stdout can
+    /// exceed the caller's output limit. Default is stdout only.
+    #[arg(long, value_name = "DIR")]
+    out: Option<PathBuf>,
 
     /// OpenRouter API key for agents you have no native login for. Also read
     /// from OPENROUTER_API_KEY or ~/.config/postmortem/key.
@@ -128,21 +135,38 @@ fn run(args: RunArgs) -> Result<()> {
 
     let reports = runner::run_all(&selected, &prompt, &cwd, timeout)?;
 
-    for r in &reports {
-        println!("\n\n# {}\n", r.agent.name());
-        match &r.outcome {
-            Outcome::Ok => println!("{}", r.output.trim()),
-            Outcome::TimedOut => println!("_timed out_"),
-            Outcome::Failed(why) => {
-                println!("_failed: {why}_\n\n```\n{}\n```", r.stderr.trim());
-            }
+    // When --out is set, write each agent's output to a file and print the
+    // paths first, so they survive even if the stdout body is later truncated
+    // by the caller. stdout still carries the full sections by default.
+    if let Some(dir) = &args.out {
+        std::fs::create_dir_all(dir)?;
+        println!("Per-agent outputs written to:");
+        for r in &reports {
+            let path = dir.join(format!("{}.md", r.agent.name()));
+            let _ = std::fs::write(&path, report_section(r));
+            println!("  {}", path.display());
         }
+    }
+
+    for r in &reports {
+        print!("\n\n{}", report_section(r));
     }
 
     if reports.iter().all(|r| r.outcome != Outcome::Ok) {
         bail!("all agents failed");
     }
     Ok(())
+}
+
+/// One agent's section: a `# name` header and its output (or a failure note
+/// with stderr). The same text is printed to stdout and, with --out, a file.
+fn report_section(r: &Report) -> String {
+    let body = match &r.outcome {
+        Outcome::Ok => r.output.trim().to_string(),
+        Outcome::TimedOut => "_timed out_".to_string(),
+        Outcome::Failed(why) => format!("_failed: {why}_\n\n```\n{}\n```", r.stderr.trim()),
+    };
+    format!("# {}\n\n{body}\n", r.agent.name())
 }
 
 fn doctor() -> Result<()> {
@@ -300,8 +324,8 @@ fn start_vibe_home(selected: &[Agent]) -> Option<vibe::Home> {
     }
 }
 
-/// OpenRouter slug the Vibe leg (Mistral's CLI) runs on; mirrors the constant
-/// in agents.rs so the config and env agree.
+/// OpenRouter slug the Vibe leg (Mistral's CLI) runs on; written into the
+/// scratch VIBE_HOME config (see vibe.rs).
 const VIBE_OPENROUTER_MODEL: &str = "mistralai/mistral-medium-3.1";
 
 /// Read by an AI agent (via `postmortem skill`) to author a Claude Code skill.
@@ -329,6 +353,8 @@ panel review, or says "postmortem this". It should:
 3. Read the per-agent outputs from stdout and synthesize one verdict: merge and
    deduplicate findings, weight by cross-agent consensus, drop false positives,
    rank by severity with file:line, and end with a clear ship / don't-ship call.
+   If the panel is large and stdout looks truncated, rerun with `--out <dir>`
+   (writes each agent's full output to `<dir>/<agent>.md`) and read those files.
 
 Place it at `.claude/skills/postmortem/SKILL.md` for this repo, or
 `~/.claude/skills/postmortem/SKILL.md` for all repos. Use the current skill
