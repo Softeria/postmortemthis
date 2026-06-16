@@ -31,14 +31,21 @@ jobs:
       - run: cargo build --release --target ${{ matrix.target }}
         env:
           POSTMORTEM_VERSION: ${{ steps.ver.outputs.v }}
-      - name: Stage binary
+      - name: Package archive
         shell: bash
         run: |
-          mkdir dist
-          ext=""
-          [ "${{ runner.os }}" = "Windows" ] && ext=".exe"
-          cp "target/${{ matrix.target }}/release/postmortem${ext}" \
-             "dist/postmortem-${{ matrix.target }}${ext}"
+          mkdir dist staging
+          bin="postmortem"
+          if [ "${{ runner.os }}" = "Windows" ]; then bin="postmortem.exe"; fi
+          cp "target/${{ matrix.target }}/release/${bin}" "staging/${bin}"
+          # Archive named with the target triple so gg matches the platform;
+          # the binary inside is just `postmortem`/`postmortem.exe` so gg's bin
+          # patterns find it after extraction.
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            (cd staging && 7z a "../dist/postmortem-${{ matrix.target }}.zip" "${bin}")
+          else
+            tar -czf "dist/postmortem-${{ matrix.target }}.tar.gz" -C staging "${bin}"
+          fi
       - uses: softprops/action-gh-release@v2
         with:
           files: dist/*
