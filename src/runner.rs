@@ -13,6 +13,12 @@ pub struct Report {
     pub stderr: String,
     pub elapsed: Duration,
     pub outcome: Outcome,
+    /// The winning (or last) attempt ran on OpenRouter rather than the native
+    /// login. Drives the per-agent provenance shown to the caller.
+    pub used_openrouter: bool,
+    /// A native attempt was made and failed, then OpenRouter was used. Drives
+    /// the "your native login failed" run note.
+    pub fell_back: bool,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -73,11 +79,78 @@ fn recv_drained(rx: &mpsc::Receiver<String>, child: &mut Child, group_killed: &m
     }
 }
 
-/// Run one agent to completion with a timeout. The prompt goes in on stdin.
-fn run_one(agent: Agent, prompt: &str, repo: &Path, timeout: Duration) -> Report {
+/// Run one agent, trying each path in its attempt plan in order until one
+/// succeeds: the native login first, then OpenRouter as a fallback. A failed
+/// attempt (non-zero exit) rolls on to the next; a timeout does not, since the
+/// model is likely working and a second full timeout would just double the
+/// wait. The reported elapsed time covers every attempt made.
+fn run_one(agent: Agent, prompt: &str, repo: &Path, timeout: Duration, skip_native: bool) -> Report {
     let started = Instant::now();
-    let mut cmd = agent.command(repo);
-    cmd.stdin(Stdio::piped())
+    let plan = agent.attempt_plan(skip_native);
+    if plan.is_empty() {
+        return Report {
+            agent,
+            output: String::new(),
+            stderr: String::new(),
+            elapsed: started.elapsed(),
+            outcome: Outcome::Failed("no usable login and no OpenRouter key".into()),
+            used_openrouter: false,
+            fell_back: false,
+        };
+    }
+    let mut native_failed = false;
+    let mut last: Option<Report> = None;
+    for (i, &openrouter) in plan.iter().enumerate() {
+        let mut report = run_attempt(agent, prompt, repo, timeout, openrouter);
+        report.fell_back = native_failed && openrouter;
+        match report.outcome {
+            Outcome::Ok | Outcome::TimedOut => {
+                report.elapsed = started.elapsed();
+                return report;
+            }
+            Outcome::Failed(_) => {
+                if !openrouter {
+                    native_failed = true;
+                }
+                if i + 1 < plan.len() {
+                    eprintln!(
+                        "  [{}] {} attempt failed; falling back to {}",
+                        agent.name(),
+                        mode_label(openrouter),
+                        mode_label(plan[i + 1]),
+                    );
+                }
+                last = Some(report);
+            }
+        }
+    }
+    let mut report = last.expect("attempt plan is non-empty");
+    report.elapsed = started.elapsed();
+    report
+}
+
+fn mode_label(openrouter: bool) -> &'static str {
+    if openrouter { "OpenRouter" } else { "native" }
+}
+
+/// Run a single attempt to completion with a timeout. The prompt goes in on
+/// stdin. `openrouter` selects the native-login or OpenRouter command.
+fn run_attempt(
+    agent: Agent,
+    prompt: &str,
+    repo: &Path,
+    timeout: Duration,
+    openrouter: bool,
+) -> Report {
+    let started = Instant::now();
+    let mut cmd = agent.command(repo, openrouter);
+    // Most agents read the prompt on stdin; the rest (vibe) take it as a
+    // trailing argument and get no stdin.
+    let on_stdin = agent.reads_stdin();
+    if !on_stdin {
+        cmd.arg(prompt);
+    }
+    cmd.stdin(if on_stdin { Stdio::piped() } else { Stdio::null() })
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     // Own process group, so a timeout can kill the whole tree.
@@ -93,18 +166,21 @@ fn run_one(agent: Agent, prompt: &str, repo: &Path, timeout: Duration) -> Report
                 stderr: String::new(),
                 elapsed: started.elapsed(),
                 outcome: Outcome::Failed(format!("failed to spawn: {e}")),
+                used_openrouter: openrouter,
+                fell_back: false,
             };
         }
     };
 
-    // Feed the prompt on a thread; a write error just means the agent died
-    // before reading it, which the exit status will report. Dropping the
-    // handle closes the pipe so the agent sees EOF.
-    let mut stdin_pipe = child.stdin.take().expect("stdin piped");
-    let prompt_owned = prompt.to_string();
-    std::thread::spawn(move || {
-        let _ = stdin_pipe.write_all(prompt_owned.as_bytes());
-    });
+    // Feed the prompt on a thread when the agent reads stdin; a write error
+    // just means the agent died before reading it, which the exit status will
+    // report. Dropping the handle closes the pipe so the agent sees EOF.
+    if on_stdin && let Some(mut stdin_pipe) = child.stdin.take() {
+        let prompt_owned = prompt.to_string();
+        std::thread::spawn(move || {
+            let _ = stdin_pipe.write_all(prompt_owned.as_bytes());
+        });
+    }
 
     let out_rx = drain(child.stdout.take().expect("stdout piped"));
     let err_rx = drain(child.stderr.take().expect("stderr piped"));
@@ -120,6 +196,8 @@ fn run_one(agent: Agent, prompt: &str, repo: &Path, timeout: Duration) -> Report
                 stderr: recv_drained(&err_rx, &mut child, &mut group_killed),
                 elapsed: started.elapsed(),
                 outcome: Outcome::Failed(format!("wait failed: {e}")),
+                used_openrouter: openrouter,
+                fell_back: false,
             };
         }
     };
@@ -141,6 +219,8 @@ fn run_one(agent: Agent, prompt: &str, repo: &Path, timeout: Duration) -> Report
         stderr,
         elapsed: started.elapsed(),
         outcome,
+        used_openrouter: openrouter,
+        fell_back: false,
     }
 }
 
@@ -150,13 +230,15 @@ pub fn run_all(
     prompt: &str,
     repo: &Path,
     timeout: Duration,
+    skip_native: &[Agent],
 ) -> Result<Vec<Report>> {
     let (tx, rx) = mpsc::channel::<Report>();
     std::thread::scope(|scope| {
         for &agent in agents {
             let tx = tx.clone();
+            let skip = skip_native.contains(&agent);
             scope.spawn(move || {
-                let report = run_one(agent, prompt, repo, timeout);
+                let report = run_one(agent, prompt, repo, timeout, skip);
                 let _ = tx.send(report);
             });
         }
