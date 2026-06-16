@@ -13,6 +13,12 @@ pub struct Report {
     pub stderr: String,
     pub elapsed: Duration,
     pub outcome: Outcome,
+    /// The winning (or last) attempt ran on OpenRouter rather than the native
+    /// login. Drives the per-agent provenance shown to the caller.
+    pub used_openrouter: bool,
+    /// A native attempt was made and failed, then OpenRouter was used. Drives
+    /// the "your native login failed" run note.
+    pub fell_back: bool,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -78,9 +84,9 @@ fn recv_drained(rx: &mpsc::Receiver<String>, child: &mut Child, group_killed: &m
 /// attempt (non-zero exit) rolls on to the next; a timeout does not, since the
 /// model is likely working and a second full timeout would just double the
 /// wait. The reported elapsed time covers every attempt made.
-fn run_one(agent: Agent, prompt: &str, repo: &Path, timeout: Duration) -> Report {
+fn run_one(agent: Agent, prompt: &str, repo: &Path, timeout: Duration, skip_native: bool) -> Report {
     let started = Instant::now();
-    let plan = agent.attempt_plan();
+    let plan = agent.attempt_plan(skip_native);
     if plan.is_empty() {
         return Report {
             agent,
@@ -88,17 +94,24 @@ fn run_one(agent: Agent, prompt: &str, repo: &Path, timeout: Duration) -> Report
             stderr: String::new(),
             elapsed: started.elapsed(),
             outcome: Outcome::Failed("no usable login and no OpenRouter key".into()),
+            used_openrouter: false,
+            fell_back: false,
         };
     }
+    let mut native_failed = false;
     let mut last: Option<Report> = None;
     for (i, &openrouter) in plan.iter().enumerate() {
         let mut report = run_attempt(agent, prompt, repo, timeout, openrouter);
+        report.fell_back = native_failed && openrouter;
         match report.outcome {
             Outcome::Ok | Outcome::TimedOut => {
                 report.elapsed = started.elapsed();
                 return report;
             }
             Outcome::Failed(_) => {
+                if !openrouter {
+                    native_failed = true;
+                }
                 if i + 1 < plan.len() {
                     eprintln!(
                         "  [{}] {} attempt failed; falling back to {}",
@@ -147,6 +160,8 @@ fn run_attempt(
                 stderr: String::new(),
                 elapsed: started.elapsed(),
                 outcome: Outcome::Failed(format!("failed to spawn: {e}")),
+                used_openrouter: openrouter,
+                fell_back: false,
             };
         }
     };
@@ -174,6 +189,8 @@ fn run_attempt(
                 stderr: recv_drained(&err_rx, &mut child, &mut group_killed),
                 elapsed: started.elapsed(),
                 outcome: Outcome::Failed(format!("wait failed: {e}")),
+                used_openrouter: openrouter,
+                fell_back: false,
             };
         }
     };
@@ -195,6 +212,8 @@ fn run_attempt(
         stderr,
         elapsed: started.elapsed(),
         outcome,
+        used_openrouter: openrouter,
+        fell_back: false,
     }
 }
 
@@ -204,13 +223,15 @@ pub fn run_all(
     prompt: &str,
     repo: &Path,
     timeout: Duration,
+    skip_native: &[Agent],
 ) -> Result<Vec<Report>> {
     let (tx, rx) = mpsc::channel::<Report>();
     std::thread::scope(|scope| {
         for &agent in agents {
             let tx = tx.clone();
+            let skip = skip_native.contains(&agent);
             scope.spawn(move || {
-                let report = run_one(agent, prompt, repo, timeout);
+                let report = run_one(agent, prompt, repo, timeout, skip);
                 let _ = tx.send(report);
             });
         }

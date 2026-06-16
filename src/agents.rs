@@ -25,15 +25,12 @@ pub const ALL: [Agent; 5] = [
     Agent::Vibe,
 ];
 
-/// OpenRouter slug for the Qwen leg. Qwen Code has no widely-held native
-/// login, so it runs through OpenRouter when a key is present.
-const QWEN_OPENROUTER_MODEL: &str = "qwen/qwen3-coder";
-
-/// Codex `-c` overrides that define OpenRouter as a custom model provider,
-/// plus the model slug - all compile-time constant. `wire_api` is omitted:
-/// codex defaults to the Responses API, which OpenRouter implements. `name`
-/// is mandatory (codex errors on an empty provider name) though cosmetic.
-const CODEX_OPENROUTER_ARGS: [&str; 10] = [
+/// Codex `-c` overrides that define OpenRouter as a custom model provider -
+/// all compile-time constant. The model (`-m`) is appended separately from
+/// `openrouter_model()`. `wire_api` is omitted: codex defaults to the
+/// Responses API, which OpenRouter implements. `name` is mandatory (codex
+/// errors on an empty provider name) though cosmetic.
+const CODEX_OPENROUTER_ARGS: [&str; 8] = [
     "-c",
     "model_provider=\"openrouter\"",
     "-c",
@@ -42,8 +39,6 @@ const CODEX_OPENROUTER_ARGS: [&str; 10] = [
     "model_providers.openrouter.base_url=\"https://openrouter.ai/api/v1\"",
     "-c",
     "model_providers.openrouter.env_key=\"OPENROUTER_API_KEY\"",
-    "-m",
-    "openai/gpt-5",
 ];
 
 /// How an agent's CLI is reached.
@@ -78,6 +73,31 @@ impl Agent {
         }
     }
 
+    /// The OpenRouter model slug this agent runs on when it has no usable
+    /// native login (or is forced there). Single source for the env/args and
+    /// for the provenance shown to the caller.
+    pub fn openrouter_model(&self) -> &'static str {
+        match self {
+            Agent::Claude => "anthropic/claude-sonnet-4.6",
+            Agent::Codex => "openai/gpt-5",
+            Agent::Gemini => "google/gemini-3.1-pro-preview",
+            Agent::Qwen => "qwen/qwen3-coder",
+            Agent::Vibe => "mistralai/mistral-medium-3.1",
+        }
+    }
+
+    /// One-line hint, shown in the run notes, for restoring an agent's native
+    /// login after it failed. Only the agents that have a native path are ever
+    /// shown this (qwen/vibe never fall back - they have no native login).
+    pub fn native_fix_hint(&self) -> &'static str {
+        match self {
+            Agent::Claude => "run `claude` once to refresh its login",
+            Agent::Codex => "run `codex login` to refresh its login",
+            Agent::Gemini => "set GEMINI_API_KEY (gemini's Google OAuth cannot run headless)",
+            Agent::Qwen | Agent::Vibe => "no native login; runs on OpenRouter",
+        }
+    }
+
     pub fn from_name(s: &str) -> Option<Agent> {
         match s.trim().to_lowercase().as_str() {
             "claude" | "claude-code" => Some(Agent::Claude),
@@ -109,6 +129,8 @@ impl Agent {
                 let mut a = vec!["exec", "--ignore-user-config"];
                 if openrouter {
                     a.extend_from_slice(&CODEX_OPENROUTER_ARGS);
+                    a.push("-m");
+                    a.push(self.openrouter_model());
                 }
                 a.extend_from_slice(&[
                     "--sandbox",
@@ -161,11 +183,12 @@ impl Agent {
     /// Ordered attempts for this agent: `false` runs on the native login,
     /// `true` runs on OpenRouter. The native login is tried first when the
     /// user has one; OpenRouter follows as a fallback (or as the only attempt
-    /// when there is no usable login). An empty plan means there is nothing to
-    /// try - no login and no key.
-    pub fn attempt_plan(&self) -> Vec<bool> {
+    /// when there is no usable login). `skip_native` drops the native attempt
+    /// (the caller asked, via --skip-native, to go straight to OpenRouter). An
+    /// empty plan means there is nothing to try - no login and no key.
+    pub fn attempt_plan(&self, skip_native: bool) -> Vec<bool> {
         let mut plan = Vec::new();
-        if self.authed() {
+        if self.authed() && !skip_native {
             plan.push(false);
         }
         if openrouter::key().is_some() && self.openrouter_capable() {
@@ -206,7 +229,7 @@ impl Agent {
             Agent::Claude => vec![
                 ("ANTHROPIC_BASE_URL", "https://openrouter.ai/api".into()),
                 ("ANTHROPIC_AUTH_TOKEN", key.to_string()),
-                ("ANTHROPIC_MODEL", "anthropic/claude-sonnet-4.6".into()),
+                ("ANTHROPIC_MODEL", self.openrouter_model().into()),
                 ("MAX_THINKING_TOKENS", "0".into()),
             ],
             Agent::Codex => vec![("OPENROUTER_API_KEY", key.to_string())],
@@ -237,7 +260,7 @@ impl Agent {
             Agent::Qwen => vec![
                 ("OPENAI_API_KEY", key.to_string()),
                 ("OPENAI_BASE_URL", "https://openrouter.ai/api/v1".into()),
-                ("OPENAI_MODEL", QWEN_OPENROUTER_MODEL.into()),
+                ("OPENAI_MODEL", self.openrouter_model().into()),
             ],
             // Vibe reads its provider/model from the scratch VIBE_HOME and the
             // key from OPENROUTER_API_KEY (named in that config). VIBE_HOME is

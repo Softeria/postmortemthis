@@ -59,6 +59,12 @@ struct RunArgs {
     #[arg(long, value_delimiter = ',')]
     agents: Vec<String>,
 
+    /// Comma-separated agents to send straight to OpenRouter, skipping their
+    /// native login attempt. Use when a native login is known-broken and you
+    /// want to avoid the wasted retry (see the run notes after a fallback).
+    #[arg(long, value_delimiter = ',')]
+    skip_native: Vec<String>,
+
     /// Update the agent CLIs to their latest versions (gg update -u) before
     /// running. gg does this in parallel; a no-op if no gg is present.
     #[arg(long)]
@@ -113,6 +119,7 @@ fn run(args: RunArgs) -> Result<()> {
     }
 
     let selected = select_agents(&args.agents)?;
+    let skip_native = parse_agents(&args.skip_native)?;
     let cwd = std::env::current_dir()?;
     let timeout = Duration::from_secs(args.timeout);
 
@@ -138,7 +145,7 @@ fn run(args: RunArgs) -> Result<()> {
 
     prewarm(&selected, &cwd);
 
-    let reports = runner::run_all(&selected, &prompt, &cwd, timeout)?;
+    let reports = runner::run_all(&selected, &prompt, &cwd, timeout, &skip_native)?;
 
     // When --out is set, write each agent's output to a file and print the
     // paths first, so they survive even if the stdout body is later truncated
@@ -157,21 +164,74 @@ fn run(args: RunArgs) -> Result<()> {
         print!("\n\n{}", report_section(r));
     }
 
+    let notes = run_notes(&reports, &selected);
+    if !notes.is_empty() {
+        print!(
+            "\n\n---\n\n# postmortem run notes (operational; not part of the review)\n\n{}\n",
+            notes.join("\n")
+        );
+    }
+
     if reports.iter().all(|r| r.outcome != Outcome::Ok) {
         bail!("all agents failed");
     }
     Ok(())
 }
 
-/// One agent's section: a `# name` header and its output (or a failure note
-/// with stderr). The same text is printed to stdout and, with --out, a file.
+/// One agent's section: a `# name (provenance)` header and its output (or a
+/// failure note with stderr). The provenance tells the synthesizing agent
+/// which model actually answered, so it can weight opinions. The same text is
+/// printed to stdout and, with --out, a file.
 fn report_section(r: &Report) -> String {
+    let provenance = if r.used_openrouter {
+        format!("via OpenRouter: {}", r.agent.openrouter_model())
+    } else {
+        "native login".to_string()
+    };
     let body = match &r.outcome {
         Outcome::Ok => r.output.trim().to_string(),
         Outcome::TimedOut => "_timed out_".to_string(),
         Outcome::Failed(why) => format!("_failed: {why}_\n\n```\n{}\n```", r.stderr.trim()),
     };
-    format!("# {}\n\n{body}\n", r.agent.name())
+    format!("# {} ({provenance})\n\n{body}\n", r.agent.name())
+}
+
+/// Operational notes for the calling agent: what it can fix or change on a
+/// later run. Empty when there is nothing worth saying. Kept terse and
+/// imperative because the consumer is an LLM composing the next command.
+fn run_notes(reports: &[Report], selected: &[Agent]) -> Vec<String> {
+    let mut notes = Vec::new();
+
+    for r in reports {
+        let name = r.agent.name();
+        if r.fell_back {
+            notes.push(format!(
+                "- {name}: native login failed, so it ran on OpenRouter ({}). To restore the native login, {}. To skip the wasted retry on later runs, add `--skip-native {name}`.",
+                r.agent.openrouter_model(),
+                r.agent.native_fix_hint(),
+            ));
+        }
+        if r.outcome == Outcome::TimedOut {
+            notes.push(format!(
+                "- {name}: timed out. Raise --timeout or shorten the prompt."
+            ));
+        }
+    }
+
+    // Agents that exist but were not run because they have no login and no key.
+    let has_key = openrouter::key().is_some();
+    if !has_key {
+        for agent in agents::ALL {
+            if agent.via().is_some() && !selected.contains(&agent) && !agent.authed() {
+                notes.push(format!(
+                    "- {}: skipped (no native login, no OpenRouter key). Run `postmortem login` or set OPENROUTER_API_KEY to include it.",
+                    agent.name()
+                ));
+            }
+        }
+    }
+
+    notes
 }
 
 fn doctor() -> Result<()> {
@@ -218,18 +278,24 @@ fn doctor() -> Result<()> {
     Ok(())
 }
 
+/// Resolve agent names to `Agent`s, erroring on an unknown name.
+fn parse_agents(names: &[String]) -> Result<Vec<Agent>> {
+    names
+        .iter()
+        .map(|s| {
+            Agent::from_name(s).ok_or_else(|| {
+                anyhow::anyhow!("unknown agent '{s}' (known: claude, codex, gemini, qwen, vibe)")
+            })
+        })
+        .collect()
+}
+
 fn select_agents(requested: &[String]) -> Result<Vec<Agent>> {
     let explicit = !requested.is_empty();
     let candidates: Vec<Agent> = if requested.is_empty() {
         agents::ALL.to_vec()
     } else {
-        requested
-            .iter()
-            .map(|s| {
-                Agent::from_name(s)
-                    .ok_or_else(|| anyhow::anyhow!("unknown agent '{s}' (known: claude, codex, gemini)"))
-            })
-            .collect::<Result<_>>()?
+        parse_agents(requested)?
     };
 
     let mut selected: Vec<Agent> = Vec::new();
@@ -287,9 +353,6 @@ fn prewarm(selected: &[Agent], dir: &std::path::Path) {
     }
 }
 
-/// OpenRouter slug the Gemini leg forwards to when it has no native login.
-const GEMINI_OPENROUTER_MODEL: &str = "google/gemini-3.1-pro-preview";
-
 /// Bring up the gemshim bridge when the Gemini leg will run on OpenRouter
 /// (Gemini selected and an OpenRouter key is present). Held for the run.
 fn start_gemini_bridge(selected: &[Agent]) -> Option<gemshim::Bridge> {
@@ -298,7 +361,7 @@ fn start_gemini_bridge(selected: &[Agent]) -> Option<gemshim::Bridge> {
         return None;
     }
     let key = openrouter::key()?;
-    match gemshim::Bridge::start(key, GEMINI_OPENROUTER_MODEL) {
+    match gemshim::Bridge::start(key, Agent::Gemini.openrouter_model()) {
         Ok(bridge) => {
             eprintln!(
                 "postmortem: gemini -> OpenRouter via local gemshim bridge (127.0.0.1:{})",
@@ -320,7 +383,7 @@ fn start_vibe_home(selected: &[Agent]) -> Option<vibe::Home> {
     if !(selected.contains(&Agent::Vibe) && openrouter::key().is_some()) {
         return None;
     }
-    match vibe::Home::create(VIBE_OPENROUTER_MODEL) {
+    match vibe::Home::create(Agent::Vibe.openrouter_model()) {
         Ok(home) => Some(home),
         Err(e) => {
             eprintln!("postmortem: could not prepare vibe home ({e}); the vibe leg will fail");
@@ -328,10 +391,6 @@ fn start_vibe_home(selected: &[Agent]) -> Option<vibe::Home> {
         }
     }
 }
-
-/// OpenRouter slug the Vibe leg (Mistral's CLI) runs on; written into the
-/// scratch VIBE_HOME config (see vibe.rs).
-const VIBE_OPENROUTER_MODEL: &str = "mistralai/mistral-medium-3.1";
 
 /// Read by an AI agent (via `postmortem skill`) to author a Claude Code skill.
 /// This is the whole user-facing setup surface, reached by a one-line prompt
@@ -358,8 +417,14 @@ panel review, or says "postmortem this". It should:
 3. Read the per-agent outputs from stdout and synthesize one verdict: merge and
    deduplicate findings, weight by cross-agent consensus, drop false positives,
    rank by severity with file:line, and end with a clear ship / don't-ship call.
+   Each section header notes the model that answered (native login vs a named
+   OpenRouter model) - factor that into how you weight it.
    If the panel is large and stdout looks truncated, rerun with `--out <dir>`
    (writes each agent's full output to `<dir>/<agent>.md`) and read those files.
+4. A trailing "postmortem run notes" section is operational, not part of the
+   review: do not synthesize it. Act on it instead - relay credential fixes to
+   the user (e.g. a failed native login), and apply its suggested flags (e.g.
+   `--skip-native <agent>`) on later runs this session to avoid wasted retries.
 
 Place it at `.claude/skills/postmortem/SKILL.md` for this repo, or
 `~/.claude/skills/postmortem/SKILL.md` for all repos. Use the current skill
