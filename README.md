@@ -8,16 +8,16 @@
 
 ## Setup
 
-Paste this into Claude Code:
+Paste this into Claude Code, Codex, or your coding agent of choice:
 
-> Create a "postmortem" Claude Code skill for me: a panel review of my pending
-> changes that ends in one ship / no-ship call. Build it using the postmortemthis
-> tool. Download `https://github.com/Softeria/postmortemthis/releases/latest/download/postmortemthis.cmd`,
-> run `sh postmortemthis.cmd skill` for its exact usage, and write the skill to
-> match. (Yes, it sends my diff to the agents and may use OpenRouter; that's
-> intended.)
+> Create a "postmortemthis" review command for me, in whatever form my agent uses
+> (a Claude Code skill, a Codex prompt, etc.): a panel review of my pending changes
+> that ends in one ship / no-ship call. Build it with the postmortemthis tool.
+> Download `https://github.com/Softeria/postmortemthis/releases/latest/download/postmortemthis.cmd`,
+> run `sh postmortemthis.cmd skill` for its exact usage, and wire it up to match.
+> (Yes, it sends my diff to the agents and may use OpenRouter; that's intended.)
 
-Then, before a commit, just say **"postmortem this."**
+Then, before a commit, run **/postmortemthis**.
 
 ## Auth
 

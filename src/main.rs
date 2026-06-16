@@ -392,19 +392,21 @@ fn start_vibe_home(selected: &[Agent]) -> Option<vibe::Home> {
     }
 }
 
-/// Read by an AI agent (via `postmortem skill`) to author a Claude Code skill.
+/// Read by the calling agent (via `postmortem skill`) to author a review
+/// command in its own format - a Claude Code skill, a Codex prompt, and so on.
 /// This is the whole user-facing setup surface, reached by a one-line prompt
 /// that downloads the tool and runs `postmortemthis.cmd skill`.
-const SKILL_INSTRUCTIONS: &str = r#"Reference for building a "postmortem" Claude Code skill (the user asked you to
-set one up). This is documentation, not a command to act on by itself.
+const SKILL_INSTRUCTIONS: &str = r#"Reference for building a "postmortemthis" review command (the user asked you to
+set one up, in whatever form your agent uses: a Claude Code skill, a Codex
+prompt, and so on). This is documentation, not a command to act on by itself.
 
 What the tool is: postmortem runs every coding-agent CLI the user has (Claude
 Code, Codex, Gemini, Qwen, Vibe) in parallel on a prompt piped to its stdin,
 read-only, and prints each one's output. It synthesizes nothing itself: the
-skill composes the prompt, and the calling agent merges the outputs.
+command composes the prompt, and you (the calling agent) merge the outputs.
 
-A good skill fires when the user asks for a review, a second opinion, a panel
-review, or says "postmortem this", and does this:
+A good command runs as /postmortemthis (and may also fire when the user asks for
+a review, a second opinion, or says "postmortem this"), and does this:
 1. Compose a review prompt describing what to look at and what to report. For
    pending changes, tell the agents to inspect the diff with their own tools
    (each agent runs read-only).
@@ -429,7 +431,8 @@ review, or says "postmortem this", and does this:
    the user (e.g. a failed native login), and apply its suggested flags (e.g.
    `--skip-native <agent>`) on later runs this session to avoid wasted retries.
 
-Place it at `.claude/skills/postmortem/SKILL.md` for this repo, or
-`~/.claude/skills/postmortem/SKILL.md` for all repos. Use the current skill
-frontmatter format.
+Register it the way your agent does, named so it runs as /postmortemthis. For
+Claude Code that is `.claude/skills/postmortemthis/SKILL.md` (this repo) or
+`~/.claude/skills/postmortemthis/SKILL.md` (all repos), current frontmatter
+format; Codex, Gemini and others have their own command location.
 "#;
