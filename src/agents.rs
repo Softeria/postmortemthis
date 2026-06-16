@@ -1,6 +1,7 @@
 use crate::gemshim;
 use crate::gg;
 use crate::openrouter;
+use crate::vibe;
 use std::path::Path;
 use std::process::Command;
 use std::sync::OnceLock;
@@ -12,9 +13,21 @@ pub enum Agent {
     Claude,
     Codex,
     Gemini,
+    Qwen,
+    Vibe,
 }
 
-pub const ALL: [Agent; 3] = [Agent::Claude, Agent::Codex, Agent::Gemini];
+pub const ALL: [Agent; 5] = [
+    Agent::Claude,
+    Agent::Codex,
+    Agent::Gemini,
+    Agent::Qwen,
+    Agent::Vibe,
+];
+
+/// OpenRouter slug for the Qwen leg. Qwen Code has no widely-held native
+/// login, so it runs through OpenRouter when a key is present.
+const QWEN_OPENROUTER_MODEL: &str = "qwen/qwen3-coder";
 
 /// Codex `-c` overrides that define OpenRouter as a custom model provider,
 /// plus the model slug - all compile-time constant. `wire_api` is omitted:
@@ -48,6 +61,8 @@ impl Agent {
             Agent::Claude => "claude",
             Agent::Codex => "codex",
             Agent::Gemini => "gemini",
+            Agent::Qwen => "qwen",
+            Agent::Vibe => "vibe",
         }
     }
 
@@ -58,6 +73,8 @@ impl Agent {
             Agent::Claude => "claude",
             Agent::Codex => "codex",
             Agent::Gemini => "gemini-cli",
+            Agent::Qwen => "qwen",
+            Agent::Vibe => "vibe",
         }
     }
 
@@ -66,6 +83,8 @@ impl Agent {
             "claude" | "claude-code" => Some(Agent::Claude),
             "codex" => Some(Agent::Codex),
             "gemini" | "gemini-cli" => Some(Agent::Gemini),
+            "qwen" | "qwen-code" => Some(Agent::Qwen),
+            "vibe" | "mistral-vibe" => Some(Agent::Vibe),
             _ => None,
         }
     }
@@ -106,6 +125,16 @@ impl Agent {
             // edits) in a headless session, while file reads still work; also
             // skip the folder-trust prompt.
             Agent::Gemini => vec!["--skip-trust", "--approval-mode", "default"],
+            // Qwen Code is a Gemini-CLI fork: same read-only approval model.
+            // --auth-type openai pins it to the OpenAI-compatible endpoint
+            // (the OPENAI_* env points that at OpenRouter); the prompt is read
+            // from stdin like the others.
+            Agent::Qwen => vec!["--approval-mode", "default", "--auth-type", "openai"],
+            // -p: programmatic mode (prompt on stdin, print, exit). The `plan`
+            // builtin agent is read-only (no edits); --trust skips the
+            // folder-trust prompt for non-interactive use. Provider/model come
+            // from the scratch VIBE_HOME (see vibe.rs).
+            Agent::Vibe => vec!["-p", "--agent", "plan", "--trust", "--output", "text"],
         }
     }
 
@@ -158,8 +187,9 @@ impl Agent {
     /// bridge to be running (main.rs starts it before the fan-out).
     fn openrouter_capable(&self) -> bool {
         match self {
-            Agent::Claude | Agent::Codex => true,
+            Agent::Claude | Agent::Codex | Agent::Qwen => true,
             Agent::Gemini => gemshim::endpoint().is_some(),
+            Agent::Vibe => vibe::home().is_some(),
         }
     }
 
@@ -202,6 +232,23 @@ impl Agent {
                 }
                 None => vec![],
             },
+            // Qwen Code speaks the OpenAI-compatible API directly, so it needs
+            // no bridge: point its OpenAI client at OpenRouter on the key.
+            Agent::Qwen => vec![
+                ("OPENAI_API_KEY", key.to_string()),
+                ("OPENAI_BASE_URL", "https://openrouter.ai/api/v1".into()),
+                ("OPENAI_MODEL", QWEN_OPENROUTER_MODEL.into()),
+            ],
+            // Vibe reads its provider/model from the scratch VIBE_HOME and the
+            // key from OPENROUTER_API_KEY (named in that config). VIBE_HOME is
+            // not HOME, so gg's cache is untouched - no GG_CACHE_DIR needed.
+            Agent::Vibe => match vibe::home() {
+                Some(home) => vec![
+                    ("VIBE_HOME", home.to_string_lossy().into_owned()),
+                    ("OPENROUTER_API_KEY", key.to_string()),
+                ],
+                None => vec![],
+            },
         }
     }
 
@@ -212,8 +259,13 @@ impl Agent {
     /// explicit. The probes are node startups (~1s each), so they must not
     /// run once per call site.
     fn native_probe(&self) -> Option<&'static (String, String)> {
-        static CACHE: [OnceLock<Option<(String, String)>>; 3] =
-            [OnceLock::new(), OnceLock::new(), OnceLock::new()];
+        static CACHE: [OnceLock<Option<(String, String)>>; 5] = [
+            OnceLock::new(),
+            OnceLock::new(),
+            OnceLock::new(),
+            OnceLock::new(),
+            OnceLock::new(),
+        ];
         CACHE[*self as usize]
             .get_or_init(|| {
                 let mut names = vec![self.name().to_string()];
@@ -283,6 +335,9 @@ impl Agent {
             // a real API key is headless-usable. Without one, an OpenRouter
             // key routes Gemini through the gemshim bridge instead.
             Agent::Gemini => env_set("GEMINI_API_KEY") || env_set("GOOGLE_API_KEY"),
+            // Qwen and Vibe have no widely-held native login wired up; they
+            // run through OpenRouter when a key is present (see attempt_plan).
+            Agent::Qwen | Agent::Vibe => false,
         }
     }
 
@@ -292,7 +347,10 @@ impl Agent {
                 Agent::Claude => "logged in (subscription or API)".into(),
                 Agent::Codex => "logged in".into(),
                 Agent::Gemini => "API key set".into(),
+                Agent::Qwen | Agent::Vibe => "logged in".into(),
             }
+        } else if matches!(self, Agent::Qwen | Agent::Vibe) {
+            "runs via OpenRouter (needs a key; no native login wired up)".into()
         } else if matches!(self, Agent::Gemini) && gemini_oauth_present() {
             "Google OAuth login found, but it cannot run headless - set \
              GEMINI_API_KEY or pass an OpenRouter key"

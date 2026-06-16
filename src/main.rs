@@ -4,6 +4,7 @@ mod gemshim_server;
 mod gg;
 mod openrouter;
 mod runner;
+mod vibe;
 
 use agents::{Agent, Via};
 use anyhow::{Result, bail};
@@ -115,6 +116,7 @@ fn run(args: RunArgs) -> Result<()> {
     }
 
     let _bridge = start_gemini_bridge(&selected);
+    let _vibe = start_vibe_home(&selected);
 
     eprintln!(
         "postmortem: running {} agent(s) in parallel: {}",
@@ -281,6 +283,26 @@ fn start_gemini_bridge(selected: &[Agent]) -> Option<gemshim::Bridge> {
         }
     }
 }
+
+/// Write the scratch VIBE_HOME when the Vibe leg will run on OpenRouter (Vibe
+/// selected and an OpenRouter key is present). Held for the run, removed on
+/// drop.
+fn start_vibe_home(selected: &[Agent]) -> Option<vibe::Home> {
+    if !(selected.contains(&Agent::Vibe) && openrouter::key().is_some()) {
+        return None;
+    }
+    match vibe::Home::create(VIBE_OPENROUTER_MODEL) {
+        Ok(home) => Some(home),
+        Err(e) => {
+            eprintln!("postmortem: could not prepare vibe home ({e}); the vibe leg will fail");
+            None
+        }
+    }
+}
+
+/// OpenRouter slug the Vibe leg (Mistral's CLI) runs on; mirrors the constant
+/// in agents.rs so the config and env agree.
+const VIBE_OPENROUTER_MODEL: &str = "mistralai/mistral-medium-3.1";
 
 /// Read by an AI agent (via `postmortem skill`) to author a Claude Code skill.
 /// This is the whole user-facing setup surface, reached by a one-line prompt
