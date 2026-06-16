@@ -68,29 +68,24 @@ impl Gg {
 fn candidates() -> Vec<PathBuf> {
     let mut found = Vec::new();
 
-    // 1. We were ourselves launched through a gg.cmd (applet or otherwise);
-    //    its wrapper exports GG_CMD_PATH. Calling back into the same file is
-    //    exactly what the jump-out exists for.
+    // 1. We were launched through a gg.cmd (applet or otherwise); its wrapper
+    //    exports GG_CMD_PATH with the exact path it was invoked as. Calling
+    //    back into the same file is what the jump-out exists for, and it is the
+    //    normal flow: when the caller runs `sh /path/postmortemthis.cmd ...`,
+    //    that path arrives here.
     if let Some(p) = std::env::var_os("GG_CMD_PATH") {
         found.push(PathBuf::from(p));
     }
 
-    // 2. The wrapper checked into the project, the gradlew-style convention -
-    //    our own name first, plain gg.cmd as a courtesy.
-    let mut dirs: Vec<PathBuf> = Vec::new();
-    if let Ok(cwd) = std::env::current_dir() {
-        dirs.push(cwd);
-    }
-    if let Ok(out) = Command::new("git")
-        .args(["rev-parse", "--show-toplevel"])
-        .output()
-        && out.status.success()
+    // 2. A postmortemthis.cmd / gg.cmd sitting next to the binary itself (the
+    //    co-located install, e.g. both downloaded into one folder). Anchored to
+    //    the executable's own directory - deliberately NOT the working
+    //    directory. This tool runs inside the repo under review, and probing a
+    //    CWD/git-root gg.cmd would execute a script shipped by the code being
+    //    audited. The binary's own location is trusted; the review cwd is not.
+    if let Ok(exe) = std::env::current_exe()
+        && let Some(dir) = exe.parent()
     {
-        dirs.push(PathBuf::from(
-            String::from_utf8_lossy(&out.stdout).trim().to_string(),
-        ));
-    }
-    for dir in dirs {
         found.push(dir.join("postmortemthis.cmd"));
         found.push(dir.join("gg.cmd"));
     }
