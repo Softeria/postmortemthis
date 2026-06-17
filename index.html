@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>postmortemthis</title>
 <meta name="description" content="Every coding agent reviews your diff before you ship. One tiny CLI that installs, updates, and runs them all, read-only, in parallel.">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
 <style>
   :root { color-scheme: dark; }
   * { box-sizing: border-box; }
@@ -14,17 +15,23 @@
     display: flex; justify-content: center; padding: 36px 20px 64px;
   }
   main { width: 100%; max-width: 880px; }
-  .hero { width: 100%; aspect-ratio: 1280 / 668; display: block; }
+  .hero { width: 100%; aspect-ratio: 1280 / 668; display: block; background: #0b1220; border: 0; }
   .q { margin: 12px 0; }
   .q b { color: #f1f5f9; }
   .muted { color: #aebdd4; }
   h2 { font-size: 12px; letter-spacing: 1.5px; color: #5b6b85; margin: 28px 0 8px; }
+  .codewrap { position: relative; }
   pre {
     background: #0e1726; border: 1px solid #243352; border-radius: 12px;
-    padding: 16px; overflow-x: auto; color: #cdd9ea; font-size: 13.5px;
-    font-family: ui-monospace, Menlo, Consolas, monospace; white-space: pre-wrap;
+    padding: 16px; padding-right: 76px; overflow-x: auto; color: #cdd9ea; font-size: 13.5px;
+    font-family: ui-monospace, Menlo, Consolas, monospace; white-space: pre-wrap; margin: 0;
   }
   code { color: #9dc1fb; }
+  #copy {
+    position: absolute; top: 10px; right: 10px; padding: 5px 11px; font-size: 12px;
+    border-radius: 8px; border: 1px solid #283750; background: #131c2e; color: #cdd9ea; cursor: pointer;
+  }
+  #copy:hover { border-color: #34d399; color: #34d399; }
   .btns { margin: 24px 0; display: flex; gap: 12px; flex-wrap: wrap; }
   a.btn {
     text-decoration: none; padding: 11px 18px; border-radius: 10px; font-weight: 700;
@@ -46,7 +53,10 @@
 
   <h2>SETUP</h2>
   <p class="muted">Paste this into Claude Code, Codex, or your coding agent of choice:</p>
-  <pre>Create a "/postmortemthis" skill to review whatever we are working on. To do this we'll use https://github.com/Softeria/postmortemthis/releases/latest/download/postmortemthis.cmd, which runs one prompt across several coding agents at once. Run it as `echo "..." | sh postmortemthis.cmd`.</pre>
+  <div class="codewrap">
+    <pre id="prompt">Create a "/postmortemthis" skill to review whatever we are working on. To do this we'll use https://github.com/Softeria/postmortemthis/releases/latest/download/postmortemthis.cmd, which runs one prompt across several coding agents at once. Run it as `echo "..." | sh postmortemthis.cmd`.</pre>
+    <button id="copy" type="button">Copy</button>
+  </div>
   <p class="muted">Then, before the real postmortem, run <code>/postmortemthis</code>.</p>
 
   <div class="btns">
@@ -56,5 +66,13 @@
 
   <footer>MIT. Uses your own logins where you have them; one OpenRouter key fills the rest. Runs read-only, holds no keys, changes nothing.</footer>
 </main>
+<script>
+  document.getElementById('copy').addEventListener('click', function () {
+    navigator.clipboard.writeText(document.getElementById('prompt').textContent).then(() => {
+      this.textContent = 'Copied';
+      setTimeout(() => { this.textContent = 'Copy'; }, 1400);
+    });
+  });
+</script>
 </body>
 </html>
