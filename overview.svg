@@ -35,7 +35,9 @@
   <path d="M248,408 L260,414 L248,420 Z" fill="#34d399"/>
 
   <!-- ===== Claude Code hub (the actor) ===== -->
-  <circle cx="362" cy="414" r="150" fill="url(#claudeglow)"/>
+  <circle cx="362" cy="414" r="150" fill="url(#claudeglow)">
+    <animate attributeName="opacity" values="0.5;1;0.5" dur="2.6s" repeatCount="indefinite"/>
+  </circle>
   <g filter="url(#ds)">
     <rect x="262" y="330" width="200" height="172" rx="20" fill="#16110c" stroke="#d97757"/>
   </g>
@@ -62,7 +64,7 @@
     <path d="M462,388 C500,388 500,360 536,360" stroke-width="2" opacity="0.2"/>
     <path d="M462,388 C500,388 500,360 536,360" stroke-width="2" stroke-dasharray="5 14"><animate attributeName="stroke-dashoffset" from="38" to="0" dur="1.3s" repeatCount="indefinite"/></path>
     <path d="M536,468 C500,468 500,440 464,440" stroke-width="2" opacity="0.2"/>
-    <path d="M536,468 C500,468 500,440 464,440" stroke-width="2" stroke-dasharray="5 14"><animate attributeName="stroke-dashoffset" from="0" to="38" dur="1.3s" repeatCount="indefinite"/></path>
+    <path d="M536,468 C500,468 500,440 464,440" stroke-width="2" stroke-dasharray="5 14"><animate attributeName="stroke-dashoffset" from="38" to="0" dur="1.3s" repeatCount="indefinite"/></path>
   </g>
   <path d="M530,357 L542,362 L531,369 Z" fill="#34d399"/>
   <path d="M470,435 L458,440 L469,447 Z" fill="#34d399"/>
