@@ -8,7 +8,7 @@ description = "One last look before you ship. Runs every AI agent CLI you have o
 license = "MIT"
 
 [[bin]]
-name = "postmortem"
+name = "postmortemthis"
 path = "src/main.rs"
 
 [dependencies]
@@ -21,7 +21,7 @@ tokio = { version = "1", features = ["rt-multi-thread", "net", "time"] }
 axum = "0.7"
 reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
 serde_json = "1"
-# `postmortem login`: PKCE OAuth against OpenRouter (verifier randomness, the
+# `postmortemthis login`: PKCE OAuth against OpenRouter (verifier randomness, the
 # S256 challenge, and base64url encoding).
 sha2 = "0.10"
 base64 = "0.22"

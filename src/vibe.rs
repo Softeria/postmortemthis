@@ -31,7 +31,7 @@ impl Home {
     /// OpenRouter (reading the key from `OPENROUTER_API_KEY`). The caller
     /// holds the returned guard for the lifetime of the review.
     pub fn create(model: &str) -> Result<Home> {
-        let dir = std::env::temp_dir().join(format!("postmortem-vibe-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("postmortemthis-vibe-{}", std::process::id()));
         std::fs::create_dir_all(&dir).context("creating scratch VIBE_HOME")?;
         let config = config_toml(model);
         std::fs::File::create(dir.join("config.toml"))

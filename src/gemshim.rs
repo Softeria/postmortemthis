@@ -95,7 +95,7 @@ fn wait_ready(port: u16) -> Result<()> {
 /// without touching the user's real ~/.gemini. Read-only is enforced by the
 /// CLI's `--approval-mode default` (see agents.rs), not by a policy file.
 fn make_gemini_home(_port: u16) -> Result<PathBuf> {
-    let dir = std::env::temp_dir().join(format!("postmortem-gemini-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("postmortemthis-gemini-{}", std::process::id()));
     let gem = dir.join(".gemini");
     std::fs::create_dir_all(&gem)?;
     std::fs::File::create(gem.join("settings.json"))?.write_all(GEMINI_SETTINGS.as_bytes())?;

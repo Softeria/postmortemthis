@@ -17,7 +17,7 @@ impl Gg {
 
     /// Base command that invokes this file as plain gg, whatever it is named.
     /// The literal `gg` first argument is the applet jump-out: on a renamed
-    /// gg.cmd (e.g. postmortem.cmd) it bypasses applet dispatch, and on a
+    /// gg.cmd (e.g. postmortemthis.cmd) it bypasses applet dispatch, and on a
     /// plain gg.cmd it is stripped uniformly. Only gg >= 177 understands it,
     /// but older ggs also lack the agent tools and never pass `probe`.
     fn base(&self) -> Command {
