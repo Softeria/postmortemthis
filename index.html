@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>postmortemthis</title>
+<meta name="description" content="Every coding agent reviews your diff before you ship. One tiny CLI that installs, updates, and runs them all, read-only, in parallel.">
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: #0b1220; color: #e6edf6;
+    font: 16px/1.6 -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    display: flex; justify-content: center; padding: 36px 20px 64px;
+  }
+  main { width: 100%; max-width: 880px; }
+  .hero { width: 100%; aspect-ratio: 1280 / 668; display: block; }
+  .q { margin: 12px 0; }
+  .q b { color: #f1f5f9; }
+  .muted { color: #aebdd4; }
+  h2 { font-size: 12px; letter-spacing: 1.5px; color: #5b6b85; margin: 28px 0 8px; }
+  pre {
+    background: #0e1726; border: 1px solid #243352; border-radius: 12px;
+    padding: 16px; overflow-x: auto; color: #cdd9ea; font-size: 13.5px;
+    font-family: ui-monospace, Menlo, Consolas, monospace; white-space: pre-wrap;
+  }
+  code { color: #9dc1fb; }
+  .btns { margin: 24px 0; display: flex; gap: 12px; flex-wrap: wrap; }
+  a.btn {
+    text-decoration: none; padding: 11px 18px; border-radius: 10px; font-weight: 700;
+    border: 1px solid #34d399; color: #34d399; background: #06281e;
+  }
+  a.btn.ghost { border-color: #283750; color: #cdd9ea; background: #131c2e; }
+  a { color: #34d399; }
+  footer { color: #64748b; font-size: 13px; margin-top: 40px; border-top: 1px solid #1b2740; padding-top: 16px; }
+</style>
+</head>
+<body>
+<main>
+  <object class="hero" type="image/svg+xml" data="overview.svg" aria-label="postmortemthis: every coding agent you have, one verdict"></object>
+
+  <p class="q"><b>Why?</b> We needed it.</p>
+  <p class="q"><b>Why really?</b> The agent that wrote your code is the worst judge of it.</p>
+  <p class="q"><b>What?</b> Every coding-agent CLI (Claude Code, Codex, Gemini, Qwen, Vibe) reads your diff so you don't have to (you weren't going to). Read-only, in parallel; you stay in your agent, it makes the call.</p>
+  <p class="q"><b>How?</b> One tiny script that installs, updates, and runs all the agents for you, on Windows, macOS, and Linux. No setup, no server, no MCP.</p>
+
+  <h2>SETUP</h2>
+  <p class="muted">Paste this into Claude Code, Codex, or your coding agent of choice:</p>
+  <pre>Create a "/postmortemthis" skill to review whatever we are working on. To do this we'll use https://github.com/Softeria/postmortemthis/releases/latest/download/postmortemthis.cmd, which runs one prompt across several coding agents at once. Run it as `echo "..." | sh postmortemthis.cmd`.</pre>
+  <p class="muted">Then, before the real postmortem, run <code>/postmortemthis</code>.</p>
+
+  <div class="btns">
+    <a class="btn" href="https://github.com/Softeria/postmortemthis">GitHub</a>
+    <a class="btn ghost" href="https://github.com/Softeria/postmortemthis/releases/latest/download/postmortemthis.cmd">Download postmortemthis.cmd</a>
+  </div>
+
+  <footer>MIT. Uses your own logins where you have them; one OpenRouter key fills the rest. Runs read-only, holds no keys, changes nothing.</footer>
+</main>
+</body>
+</html>
