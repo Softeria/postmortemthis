@@ -25,7 +25,7 @@ const VERSION: &str = match option_env!("POSTMORTEM_VERSION") {
 /// Run the AI agent CLIs you have, in parallel, on one prompt, and print each
 /// one's output. The prompt is read from stdin; the caller decides what it says.
 #[derive(Parser)]
-#[command(name = "postmortem", version = VERSION, about, args_conflicts_with_subcommands = true)]
+#[command(name = "postmortemthis", version = VERSION, about, args_conflicts_with_subcommands = true)]
 struct Cli {
     #[command(subcommand)]
     command: Option<Cmd>,
@@ -81,7 +81,7 @@ struct RunArgs {
     out: Option<PathBuf>,
 
     /// OpenRouter API key for agents you have no native login for. Also read
-    /// from OPENROUTER_API_KEY or ~/.config/postmortem/key.
+    /// from OPENROUTER_API_KEY or ~/.config/postmortemthis/key.
     #[arg(long)]
     key: Option<String>,
 }
@@ -126,7 +126,7 @@ fn run(args: RunArgs) -> Result<()> {
     if args.update
         && let Some(gg) = gg::locate()
     {
-        eprintln!("postmortem: updating agent tools (gg update -u)...");
+        eprintln!("postmortemthis: updating agent tools (gg update -u)...");
         let _ = gg
             .update_all()
             .current_dir(&cwd)
@@ -138,7 +138,7 @@ fn run(args: RunArgs) -> Result<()> {
     let _vibe = start_vibe_home(&selected);
 
     eprintln!(
-        "postmortem: running {} agent(s) in parallel: {}",
+        "postmortemthis: running {} agent(s) in parallel: {}",
         selected.len(),
         selected.iter().map(|a| a.name()).collect::<Vec<_>>().join(", ")
     );
@@ -167,7 +167,7 @@ fn run(args: RunArgs) -> Result<()> {
     let notes = run_notes(&reports, &selected);
     if !notes.is_empty() {
         print!(
-            "\n\n---\n\n# postmortem run notes (operational; not part of the review)\n\n{}\n",
+            "\n\n---\n\n# postmortemthis run notes (operational; not part of the review)\n\n{}\n",
             notes.join("\n")
         );
     }
@@ -224,7 +224,7 @@ fn run_notes(reports: &[Report], selected: &[Agent]) -> Vec<String> {
         for agent in agents::ALL {
             if agent.via().is_some() && !selected.contains(&agent) && !agent.authed() {
                 notes.push(format!(
-                    "- {}: skipped (no native login, no OpenRouter key). Run `postmortem login` or set OPENROUTER_API_KEY to include it.",
+                    "- {}: skipped (no native login, no OpenRouter key). Run `postmortemthis login` or set OPENROUTER_API_KEY to include it.",
                     agent.name()
                 ));
             }
@@ -236,7 +236,7 @@ fn run_notes(reports: &[Report], selected: &[Agent]) -> Vec<String> {
 
 fn doctor() -> Result<()> {
     openrouter::init(None);
-    println!("postmortem doctor\n");
+    println!("postmortemthis doctor\n");
     match gg::locate() {
         Some(gg) => println!("  bootstrap: {}", gg.path().display()),
         None => println!("  bootstrap: none - agent CLIs must already be on PATH"),
@@ -273,7 +273,7 @@ fn doctor() -> Result<()> {
     }
     if !any {
         println!("\nNo agent CLIs found. Install one of claude, codex, gemini, or run");
-        println!("postmortem through postmortemthis.cmd, which bootstraps them itself.");
+        println!("postmortemthis through postmortemthis.cmd, which bootstraps them itself.");
     }
     Ok(())
 }
@@ -311,7 +311,7 @@ fn select_agents(requested: &[String]) -> Result<Vec<Agent>> {
                 selected.push(agent)
             }
             Some(Via::Gg) => eprintln!(
-                "postmortem: skipping {} (no credentials - log in once, or pass --key)",
+                "postmortemthis: skipping {} (no credentials - log in once, or pass --key)",
                 agent.name()
             ),
             None if explicit => bail!(
@@ -322,7 +322,7 @@ fn select_agents(requested: &[String]) -> Result<Vec<Agent>> {
         }
     }
     if selected.is_empty() {
-        bail!("no agent CLIs available - run `postmortem doctor`");
+        bail!("no agent CLIs available - run `postmortemthis doctor`");
     }
     Ok(selected)
 }
@@ -339,7 +339,7 @@ fn prewarm(selected: &[Agent], dir: &std::path::Path) {
     if tools.is_empty() {
         return;
     }
-    eprintln!("postmortem: bootstrapping {} (first run may download)", tools.join(", "));
+    eprintln!("postmortemthis: bootstrapping {} (first run may download)", tools.join(", "));
     match gg
         .tool(&tools.join(":"))
         .arg("--version")
@@ -348,8 +348,8 @@ fn prewarm(selected: &[Agent], dir: &std::path::Path) {
         .status()
     {
         Ok(s) if s.success() => {}
-        Ok(s) => eprintln!("postmortem: gg prewarm exited with {s}; continuing"),
-        Err(e) => eprintln!("postmortem: gg prewarm failed: {e}; continuing"),
+        Ok(s) => eprintln!("postmortemthis: gg prewarm exited with {s}; continuing"),
+        Err(e) => eprintln!("postmortemthis: gg prewarm failed: {e}; continuing"),
     }
 }
 
@@ -364,13 +364,13 @@ fn start_gemini_bridge(selected: &[Agent]) -> Option<gemshim::Bridge> {
     match gemshim::Bridge::start(key, Agent::Gemini.openrouter_model()) {
         Ok(bridge) => {
             eprintln!(
-                "postmortem: gemini -> OpenRouter via local gemshim bridge (127.0.0.1:{})",
+                "postmortemthis: gemini -> OpenRouter via local gemshim bridge (127.0.0.1:{})",
                 bridge.port()
             );
             Some(bridge)
         }
         Err(e) => {
-            eprintln!("postmortem: could not start gemini bridge ({e}); the gemini leg will fail");
+            eprintln!("postmortemthis: could not start gemini bridge ({e}); the gemini leg will fail");
             None
         }
     }
@@ -386,13 +386,13 @@ fn start_vibe_home(selected: &[Agent]) -> Option<vibe::Home> {
     match vibe::Home::create(Agent::Vibe.openrouter_model()) {
         Ok(home) => Some(home),
         Err(e) => {
-            eprintln!("postmortem: could not prepare vibe home ({e}); the vibe leg will fail");
+            eprintln!("postmortemthis: could not prepare vibe home ({e}); the vibe leg will fail");
             None
         }
     }
 }
 
-/// Read by the calling agent (via `postmortem skill`) to author a review
+/// Read by the calling agent (via `postmortemthis skill`) to author a review
 /// command in its own format - a Claude Code skill, a Codex prompt, and so on.
 /// This is the whole user-facing setup surface, reached by a one-line prompt
 /// that downloads the tool and runs `postmortemthis.cmd skill`.
@@ -400,26 +400,26 @@ const SKILL_INSTRUCTIONS: &str = r#"Reference for building a "postmortemthis" re
 set one up, in your own command format). This is documentation, not a command to
 act on by itself.
 
-What the tool is: postmortem runs every coding-agent CLI the user has (Claude
+What the tool is: postmortemthis runs every coding-agent CLI the user has (Claude
 Code, Codex, Gemini, Qwen, Vibe) in parallel on a prompt piped to its stdin,
 read-only, and prints each one's output. It synthesizes nothing itself: the
 command composes the prompt, and you (the calling agent) merge the outputs.
 
 A good command runs as /postmortemthis (and may also fire when the user asks for
-a review, a second opinion, or says "postmortem this"), and does this:
+a review, a second opinion, or says "postmortemthis this"), and does this:
 1. Compose a review prompt describing what to look at and what to report. For
    pending changes, tell the agents to inspect the diff with their own tools
    (each agent runs read-only).
 2. Pipe that prompt to the tool, in the repo, and always pass --update (the
-   agents update in parallel and postmortem runs rarely, so keep them current):
-       echo "<your prompt>" | postmortem --update --timeout 600
-   (If `postmortem` is not on PATH, call it by its full path. Keep
+   agents update in parallel and postmortemthis runs rarely, so keep them current):
+       echo "<your prompt>" | postmortemthis --update --timeout 600
+   (If `postmortemthis` is not on PATH, call it by its full path. Keep
    `postmortemthis.cmd` next to it or on PATH; it bootstraps any missing agent
    CLIs - it does not run the binary itself.) Each agent
    runs on the user's own login first; if that login fails or is missing and
    OPENROUTER_API_KEY is set, it falls back to OpenRouter. An agent with no
    working login and no key is skipped. If the user wants the OpenRouter
-   fallback and has no key, you can run `postmortem login` for them straight
+   fallback and has no key, you can run `postmortemthis login` for them straight
    from the terminal - it opens their browser once for an OAuth redirect, saves
    the key, and returns. That is expected and safe to run; you do not need a
    key in advance.
@@ -430,7 +430,7 @@ a review, a second opinion, or says "postmortem this"), and does this:
    OpenRouter model) - factor that into how you weight it.
    If the panel is large and stdout looks truncated, rerun with `--out <dir>`
    (writes each agent's full output to `<dir>/<agent>.md`) and read those files.
-4. A trailing "postmortem run notes" section is operational, not part of the
+4. A trailing "postmortemthis run notes" section is operational, not part of the
    review: do not synthesize it. Act on it instead - relay credential fixes to
    the user (e.g. a failed native login), and apply its suggested flags (e.g.
    `--skip-native <agent>`) on later runs this session to avoid wasted retries.

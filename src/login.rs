@@ -1,4 +1,4 @@
-//! `postmortem login`: get an OpenRouter API key via OAuth (PKCE) and save it
+//! `postmortemthis login`: get an OpenRouter API key via OAuth (PKCE) and save it
 //! to the key file, so later runs need no OPENROUTER_API_KEY env var or --key.
 //!
 //! OpenRouter's PKCE flow: send the user to the auth page with an S256
@@ -30,7 +30,7 @@ pub fn run() -> Result<()> {
         urlencode(&callback),
         challenge,
     );
-    println!("Opening OpenRouter to authorize postmortem.");
+    println!("Opening OpenRouter to authorize postmortemthis.");
     println!("If your browser does not open, paste this into it:\n\n  {auth}\n");
     let _ = open_browser(&auth);
     println!("Waiting for you to approve in the browser...");
@@ -40,7 +40,7 @@ pub fn run() -> Result<()> {
     let path = save_key(&key).context("saving the key")?;
 
     println!("\nConnected. Saved your OpenRouter key to {}", path.display());
-    println!("postmortem will use it automatically. Usage bills to your OpenRouter account.");
+    println!("postmortemthis will use it automatically. Usage bills to your OpenRouter account.");
     Ok(())
 }
 
@@ -65,7 +65,7 @@ fn wait_for_code(listener: &TcpListener) -> Result<String> {
         let request = String::from_utf8_lossy(&buf[..n]);
         let line = request.lines().next().unwrap_or("");
         if let Some(code) = query_param(line, "code") {
-            let body = "<html><body style=\"font-family:sans-serif\"><h2>postmortem is connected.</h2><p>You can close this tab and return to your terminal.</p></body></html>";
+            let body = "<html><body style=\"font-family:sans-serif\"><h2>postmortemthis is connected.</h2><p>You can close this tab and return to your terminal.</p></body></html>";
             let resp = format!(
                 "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
                 body.len()

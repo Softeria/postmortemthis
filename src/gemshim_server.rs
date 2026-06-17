@@ -1,6 +1,6 @@
 //! Gemini-native -> OpenRouter (OpenAI chat/completions) translator. Lets the
 //! gemini CLI run against OpenRouter, which exposes no Gemini-protocol
-//! endpoint. Runs as the hidden `postmortem __gemshim` subcommand, spawned by
+//! endpoint. Runs as the hidden `postmortemthis __gemshim` subcommand, spawned by
 //! the launcher (see `gemshim.rs`) and configured via env. Buffered: calls
 //! OpenRouter non-streaming and emits a single Gemini response (even for
 //! :streamGenerateContent), so there is no streaming-delta reassembly.

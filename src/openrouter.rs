@@ -3,7 +3,7 @@ use std::sync::OnceLock;
 /// An OpenRouter API key. Agents the user has no native login for get pointed
 /// at OpenRouter on this key, so one key fills in the whole panel without the
 /// user holding a separate account at every provider. OpenRouter handles
-/// pricing, billing, and provider routing - postmortem holds no keys and runs
+/// pricing, billing, and provider routing - postmortemthis holds no keys and runs
 /// no infrastructure.
 ///
 /// There is no region concept: OpenRouter routes globally, so unlike a
@@ -11,7 +11,7 @@ use std::sync::OnceLock;
 static KEY: OnceLock<Option<String>> = OnceLock::new();
 
 /// Resolve the key once per process. `flag_key` comes from `--key`; otherwise
-/// `OPENROUTER_API_KEY`, then `~/.config/postmortem/key`.
+/// `OPENROUTER_API_KEY`, then `~/.config/postmortemthis/key`.
 pub fn init(flag_key: Option<&str>) -> Option<&'static str> {
     KEY.get_or_init(|| {
         flag_key
@@ -34,7 +34,7 @@ pub fn key_file_path() -> Option<std::path::PathBuf> {
     Some(
         std::path::PathBuf::from(home)
             .join(".config")
-            .join("postmortem")
+            .join("postmortemthis")
             .join("key"),
     )
 }

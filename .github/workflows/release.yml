@@ -35,16 +35,16 @@ jobs:
         shell: bash
         run: |
           mkdir dist staging
-          bin="postmortem"
-          if [ "${{ runner.os }}" = "Windows" ]; then bin="postmortem.exe"; fi
+          bin="postmortemthis"
+          if [ "${{ runner.os }}" = "Windows" ]; then bin="postmortemthis.exe"; fi
           cp "target/${{ matrix.target }}/release/${bin}" "staging/${bin}"
           # Archive named with the target triple so gg matches the platform;
-          # the binary inside is just `postmortem`/`postmortem.exe` so gg's bin
+          # the binary inside is just `postmortemthis`/`postmortemthis.exe` so gg's bin
           # patterns find it after extraction.
           if [ "${{ runner.os }}" = "Windows" ]; then
-            (cd staging && 7z a "../dist/postmortem-${{ matrix.target }}.zip" "${bin}")
+            (cd staging && 7z a "../dist/postmortemthis-${{ matrix.target }}.zip" "${bin}")
           else
-            tar -czf "dist/postmortem-${{ matrix.target }}.tar.gz" -C staging "${bin}"
+            tar -czf "dist/postmortemthis-${{ matrix.target }}.tar.gz" -C staging "${bin}"
           fi
       - uses: softprops/action-gh-release@v2
         with:
