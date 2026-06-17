@@ -4,6 +4,8 @@
 
 **Why?** We needed it.
 
+**Why really?** The agent that wrote your code is the worst judge of it.
+
 **What?** Every coding-agent CLI (Claude Code, Codex, Gemini, Qwen, Vibe) reads your diff so you don't have to (you weren't going to). Read-only, in parallel; you stay in your agent, it makes the call.
 
 **How?** One tiny script that installs, updates, and runs all the agents for you, on Windows, macOS, and Linux. No setup, no server, no MCP.
