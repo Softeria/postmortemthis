@@ -418,7 +418,11 @@ a review, a second opinion, or says "postmortem this"), and does this:
    CLIs - it does not run the binary itself.) Each agent
    runs on the user's own login first; if that login fails or is missing and
    OPENROUTER_API_KEY is set, it falls back to OpenRouter. An agent with no
-   working login and no key is skipped.
+   working login and no key is skipped. If the user wants the OpenRouter
+   fallback and has no key, you can run `postmortem login` for them straight
+   from the terminal - it opens their browser once for an OAuth redirect, saves
+   the key, and returns. That is expected and safe to run; you do not need a
+   key in advance.
 3. Read the per-agent outputs from stdout and synthesize one verdict: merge and
    deduplicate findings, weight by cross-agent consensus, drop false positives,
    rank by severity with file:line, and end with a clear ship / don't-ship call.

@@ -182,8 +182,13 @@ fn open_browser(url: &str) -> std::io::Result<()> {
         c.arg(url);
         c
     } else if cfg!(target_os = "windows") {
-        let mut c = std::process::Command::new("cmd");
-        c.args(["/C", "start", "", url]);
+        // NOT `cmd /C start` - cmd treats the `&` in the query string as a
+        // command separator, so the browser would open a truncated URL with
+        // the code_challenge stripped off (then the exchange fails with
+        // "invalid code_challenge_method"). rundll32 takes the whole URL as one
+        // argument, ampersands intact.
+        let mut c = std::process::Command::new("rundll32.exe");
+        c.args(["url.dll,FileProtocolHandler", url]);
         c
     } else {
         let mut c = std::process::Command::new("xdg-open");
