@@ -6,6 +6,8 @@
 
 **What?** Every coding-agent CLI you have (Claude Code, Codex, Gemini, Qwen, Vibe) reads your diff so you don't have to (you weren't going to). Read-only, in parallel; you stay in your agent, it makes the call.
 
+**How?** A single CLI your agent calls once. No server, no MCP, no platform.
+
 ## Setup
 
 Paste this into Claude Code, Codex, or your coding agent of choice:
