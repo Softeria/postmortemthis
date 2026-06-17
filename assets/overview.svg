@@ -17,10 +17,10 @@
     </filter>
   </defs>
 
-  <!-- opaque matte fills the frame so there is no transparency (no white edge
-       on a light GitHub theme); the rounded card sits inset on top of it -->
-  <rect width="1280" height="668" fill="#090d18"/>
-  <rect x="12" y="12" width="1256" height="644" rx="22" fill="url(#bg)" stroke="#1b2740"/>
+  <!-- transparent rounded corners: <img> on GitHub preserves SVG transparency,
+       so the corners show the page background - seamless on the dark theme,
+       a faint white on the light theme -->
+  <rect x="0.5" y="0.5" width="1279" height="667" rx="26" fill="url(#bg)" stroke="#1b2740"/>
 
   <!-- header -->
   <text x="64" y="60" font-size="30" font-weight="800" fill="#f8fafc">postmortem<tspan fill="#34d399">this</tspan></text>
