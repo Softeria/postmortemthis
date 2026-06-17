@@ -126,12 +126,30 @@ fn run(args: RunArgs) -> Result<()> {
     if args.update
         && let Some(gg) = gg::locate()
     {
-        eprintln!("postmortemthis: updating agent tools (gg update -u)...");
-        let _ = gg
-            .update_all()
-            .current_dir(&cwd)
-            .stdout(std::process::Stdio::null())
-            .status();
+        // Scoped: update only the agents this run uses, in parallel - not the
+        // user's whole gg toolchain, and never postmortemthis itself.
+        let tools: Vec<&str> = selected
+            .iter()
+            .filter(|a| a.via() == Some(Via::Gg))
+            .map(|a| a.gg_tool())
+            .collect();
+        if !tools.is_empty() {
+            eprintln!("postmortemthis: updating {} ...", tools.join(", "));
+            let children: Vec<_> = tools
+                .iter()
+                .filter_map(|t| {
+                    gg.update_tool(t)
+                        .current_dir(&cwd)
+                        .stdout(std::process::Stdio::null())
+                        .stderr(std::process::Stdio::null())
+                        .spawn()
+                        .ok()
+                })
+                .collect();
+            for mut c in children {
+                let _ = c.wait();
+            }
+        }
     }
 
     let _bridge = start_gemini_bridge(&selected);

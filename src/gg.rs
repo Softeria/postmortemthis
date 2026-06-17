@@ -44,10 +44,12 @@ impl Gg {
         cmd
     }
 
-    /// `gg update -u`: update every tool gg manages, in parallel.
-    pub fn update_all(&self) -> Command {
+    /// `gg update <tool> -u`: update one specific tool. Scoped on purpose - we
+    /// only refresh the agents this run will use, never the user's whole gg
+    /// toolchain, and never the running binary itself.
+    pub fn update_tool(&self, tool: &str) -> Command {
         let mut cmd = self.base();
-        cmd.arg("update").arg("-u");
+        cmd.arg("update").arg(tool).arg("-u");
         cmd
     }
 
