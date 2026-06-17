@@ -17,7 +17,7 @@
     </filter>
   </defs>
 
-  <rect x="0.5" y="0.5" width="1279" height="667" rx="26" fill="url(#bg)" stroke="#1b2740"/>
+  <rect width="1280" height="668" fill="url(#bg)"/>
 
   <!-- header -->
   <text x="64" y="60" font-size="30" font-weight="800" fill="#f8fafc">postmortem<tspan fill="#34d399">this</tspan></text>
