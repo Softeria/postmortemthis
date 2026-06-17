@@ -15,7 +15,8 @@
     display: flex; justify-content: center; padding: 36px 20px 64px;
   }
   main { width: 100%; max-width: 880px; }
-  .hero { width: 100%; aspect-ratio: 1280 / 668; display: block; background: #0b1220; border: 0; }
+  .hero { width: 100%; aspect-ratio: 1280 / 668; display: block; }
+  .hero svg { width: 100%; height: auto; display: block; }
   .q { margin: 12px 0; }
   .q b { color: #f1f5f9; }
   .muted { color: #aebdd4; }
@@ -44,7 +45,7 @@
 </head>
 <body>
 <main>
-  <object class="hero" type="image/svg+xml" data="overview.svg" aria-label="postmortemthis: every coding agent you have, one verdict"></object>
+  <div id="hero" class="hero" role="img" aria-label="postmortemthis: every coding agent you have, one verdict"></div>
 
   <p class="q"><b>Why?</b> We needed it.</p>
   <p class="q"><b>Why really?</b> The agent that wrote your code is the worst judge of it.</p>
@@ -67,6 +68,13 @@
   <footer>MIT. Uses your own logins where you have them; one OpenRouter key fills the rest. Runs read-only, holds no keys, changes nothing.</footer>
 </main>
 <script>
+  // Inline the SVG so the page background shows through its rounded corners.
+  // Firefox paints a white backdrop behind <object>/<embed> SVGs regardless of
+  // CSS, so an inlined SVG is the only way to keep transparent corners.
+  fetch('overview.svg').then(r => r.text()).then(t => {
+    document.getElementById('hero').innerHTML = t;
+  });
+
   document.getElementById('copy').addEventListener('click', function () {
     navigator.clipboard.writeText(document.getElementById('prompt').textContent).then(() => {
       this.textContent = 'Copied';
