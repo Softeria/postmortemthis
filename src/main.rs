@@ -41,9 +41,6 @@ enum Cmd {
     Login,
     /// Show which agent CLIs are installed and authenticated.
     Doctor,
-    /// Print instructions for an AI agent to build a Claude Code skill that
-    /// drives this tool. Meant to be read by the agent, not the user.
-    Skill,
     /// Internal: run the Gemini->OpenRouter bridge server. Spawned by the tool
     /// itself; not for direct use.
     #[command(name = "__gemshim", hide = true)]
@@ -65,10 +62,10 @@ struct RunArgs {
     #[arg(long, value_delimiter = ',')]
     skip_native: Vec<String>,
 
-    /// Update the agent CLIs to their latest versions (gg update -u) before
-    /// running. gg does this in parallel; a no-op if no gg is present.
-    #[arg(long)]
-    update: bool,
+    /// Skip refreshing the agent CLIs before running. By default each selected
+    /// agent is updated (gg update <tool> -u, in parallel) so they stay current.
+    #[arg(long = "no-update")]
+    no_update: bool,
 
     /// Per-agent timeout in seconds.
     #[arg(long, default_value_t = 600)]
@@ -91,10 +88,6 @@ fn main() -> Result<()> {
     match cli.command {
         Some(Cmd::Login) => login::run(),
         Some(Cmd::Doctor) => doctor(),
-        Some(Cmd::Skill) => {
-            print!("{SKILL_INSTRUCTIONS}");
-            Ok(())
-        }
         Some(Cmd::Gemshim) => {
             gemshim_server::run();
             Ok(())
@@ -123,7 +116,7 @@ fn run(args: RunArgs) -> Result<()> {
     let cwd = std::env::current_dir()?;
     let timeout = Duration::from_secs(args.timeout);
 
-    if args.update
+    if !args.no_update
         && let Some(gg) = gg::locate()
     {
         // Scoped: update only the agents this run uses, in parallel - not the
@@ -410,51 +403,3 @@ fn start_vibe_home(selected: &[Agent]) -> Option<vibe::Home> {
     }
 }
 
-/// Read by the calling agent (via `postmortemthis skill`) to author a review
-/// command in its own format - a Claude Code skill, a Codex prompt, and so on.
-/// This is the whole user-facing setup surface, reached by a one-line prompt
-/// that downloads the tool and runs `postmortemthis.cmd skill`.
-const SKILL_INSTRUCTIONS: &str = r#"Reference for building a "postmortemthis" review command (the user asked you to
-set one up, in your own command format). This is documentation, not a command to
-act on by itself.
-
-What the tool is: postmortemthis runs every coding-agent CLI the user has (Claude
-Code, Codex, Gemini, Qwen, Vibe) in parallel on a prompt piped to its stdin,
-read-only, and prints each one's output. It synthesizes nothing itself: the
-command composes the prompt, and you (the calling agent) merge the outputs.
-
-A good command runs as /postmortemthis (and may also fire when the user asks for
-a review, a second opinion, or says "postmortemthis this"), and does this:
-1. Compose a review prompt describing what to look at and what to report. For
-   pending changes, tell the agents to inspect the diff with their own tools
-   (each agent runs read-only).
-2. Pipe that prompt to the tool, in the repo, and always pass --update (the
-   agents update in parallel and postmortemthis runs rarely, so keep them current):
-       echo "<your prompt>" | postmortemthis --update --timeout 600
-   (If `postmortemthis` is not on PATH, call it by its full path. Keep
-   `postmortemthis.cmd` next to it or on PATH; it bootstraps any missing agent
-   CLIs - it does not run the binary itself.) Each agent
-   runs on the user's own login first; if that login fails or is missing and
-   OPENROUTER_API_KEY is set, it falls back to OpenRouter. An agent with no
-   working login and no key is skipped. If the user wants the OpenRouter
-   fallback and has no key, you can run `postmortemthis login` for them straight
-   from the terminal - it opens their browser once for an OAuth redirect, saves
-   the key, and returns. That is expected and safe to run; you do not need a
-   key in advance.
-3. Read the per-agent outputs from stdout and synthesize one verdict: merge and
-   deduplicate findings, weight by cross-agent consensus, drop false positives,
-   rank by severity with file:line, and end with a clear ship / don't-ship call.
-   Each section header notes the model that answered (native login vs a named
-   OpenRouter model) - factor that into how you weight it.
-   If the panel is large and stdout looks truncated, rerun with `--out <dir>`
-   (writes each agent's full output to `<dir>/<agent>.md`) and read those files.
-4. A trailing "postmortemthis run notes" section is operational, not part of the
-   review: do not synthesize it. Act on it instead - relay credential fixes to
-   the user (e.g. a failed native login), and apply its suggested flags (e.g.
-   `--skip-native <agent>`) on later runs this session to avoid wasted retries.
-
-Register it the way your agent does, named so it runs as /postmortemthis. For
-Claude Code that is `.claude/skills/postmortemthis/SKILL.md` (this repo) or
-`~/.claude/skills/postmortemthis/SKILL.md` (all repos), current frontmatter
-format; Codex, Gemini and others have their own command location.
-"#;

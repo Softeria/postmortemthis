@@ -12,11 +12,9 @@
 
 Paste this into Claude Code, Codex, or your coding agent of choice:
 
-> Create a "postmortemthis" review command for me: a panel review of my pending
-> changes that ends in one ship / no-ship call. Build it with the postmortemthis tool.
-> Download `https://github.com/Softeria/postmortemthis/releases/latest/download/postmortemthis.cmd`,
-> run `sh postmortemthis.cmd skill` for its exact usage, and wire it up to match.
-> (Yes, it sends my diff to the agents and may use OpenRouter; that's intended.)
+> Create a "/postmortemthis" skill to review whatever we are working on. To do this
+> we'll use https://github.com/Softeria/postmortemthis/releases/latest/download/postmortemthis.cmd,
+> which runs one prompt across several coding agents at once. Run it as `echo "…" | sh postmortemthis.cmd`.
 
 Then, before the real postmortem, run **/postmortemthis**.
 
