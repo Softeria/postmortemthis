@@ -14,9 +14,10 @@
 
 Paste this into Claude Code, Codex, or your coding agent of choice:
 
-> Create a "/postmortemthis" skill to review whatever we are working on. To do this
-> we'll use https://github.com/Softeria/postmortemthis/releases/latest/download/postmortemthis.cmd,
-> which runs one prompt across several coding agents at once. Run it as `echo "…" | sh postmortemthis.cmd`.
+> Create a "/postmortemthis" skill to review whatever we are working on. Download
+> https://github.com/Softeria/postmortemthis/releases/latest/download/postmortemthis.cmd
+> once into the skill folder (re-fetch only if missing), then run the local copy — it runs
+> one prompt across several coding agents at once. Run it as `echo "…" | sh postmortemthis.cmd`.
 
 Then, before the real postmortem, run **/postmortemthis**.
 
