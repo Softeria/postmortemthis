@@ -21,6 +21,8 @@ Paste this into Claude Code, Codex, or your coding agent of choice:
 
 Then, before the real postmortem, run **/postmortemthis**.
 
+That prompt is the whole install — your agent writes the skill from it. **Tweak the wording before you hit enter** (different agents, a sharper review focus, your own house rules); there's no canonical skill file to clone, and your agent will happily make one as good or better than ours. The script is the only fixed part.
+
 ## Auth
 
 Your own logins where you have them. For the rest, `sh postmortemthis.cmd login` (OpenRouter OAuth) or set `OPENROUTER_API_KEY`. Usage bills to your account; this resells nothing.
