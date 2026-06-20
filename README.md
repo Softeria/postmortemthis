@@ -21,7 +21,7 @@ Paste this into Claude Code, Codex, or your coding agent of choice:
 
 Then, before the real postmortem, run **/postmortemthis**.
 
-That prompt is the whole install — your agent writes the skill from it. **Tweak the wording before you hit enter** (different agents, a sharper review focus, your own house rules); there's no canonical skill file to clone, and your agent will happily make one as good or better than ours. The script is the only fixed part.
+That prompt is the whole install — your agent writes the skill from it. **Tweak the wording before you hit enter** (different agents, a sharper review focus, your own house rules); the [skill in this repo](skills/postmortemthis/SKILL.md) is just a starting point, and your agent will happily make one as good or better. The script is the only fixed part.
 
 ## Auth
 
