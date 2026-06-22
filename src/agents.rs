@@ -120,8 +120,24 @@ impl Agent {
     /// newline-containing arguments outright.
     fn args(&self, openrouter: bool) -> Vec<&'static str> {
         match self {
-            // -p: headless print mode; plan mode keeps it read-only.
-            Agent::Claude => vec!["-p", "--permission-mode", "plan"],
+            // -p: headless print mode. `dontAsk` keeps it read-only WITHOUT
+            // diverting the review into a plan. Plan mode delivers the model's
+            // analysis through the ExitPlanMode tool call, which `-p` text
+            // output never prints - only the trailing sign-off survives, so the
+            // entire review was being lost. `dontAsk` instead auto-denies any
+            // tool that needs permission (writes, edits, arbitrary shell)
+            // without prompting, while the allow-listed read tools - plus
+            // read-only git, so it can actually see the diff - run freely and
+            // the model answers as normal text on stdout. (`--bare` would also
+            // skip keychain reads, breaking native login on macOS, so it is
+            // deliberately not used.)
+            Agent::Claude => vec![
+                "-p",
+                "--permission-mode",
+                "dontAsk",
+                "--allowedTools",
+                "Read,Grep,Glob,Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git status:*),Bash(git rev-parse:*)",
+            ],
             // `-`: read the prompt from stdin. For OpenRouter, the `-c`
             // overrides defining the provider must sit right after `exec`
             // (codex's built-in openai provider can't be repointed by env
