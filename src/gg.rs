@@ -3,7 +3,7 @@ use std::process::Command;
 use std::sync::OnceLock;
 
 /// A located gg.cmd that supports the agent CLI tools (claude, codex,
-/// gemini-cli). gg bootstraps each tool on first use into its own cache;
+/// antigravity). gg bootstraps each tool on first use into its own cache;
 /// the user's auth (~/.claude, ~/.codex, ~/.gemini) is untouched and shared
 /// with any native install.
 pub struct Gg {

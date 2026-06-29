@@ -4,8 +4,7 @@
 //! provider list from `$VIBE_HOME/config.toml` (array-of-table entries that
 //! env overrides can't reach). So when the vibe leg needs OpenRouter we write
 //! a disposable home with a single OpenRouter provider and a read-only default
-//! agent, point the CLI at it, and remove it afterwards - the same
-//! disposable-scratch pattern as the gemini bridge, minus the server.
+//! agent, point the CLI at it, and remove it afterwards.
 
 use anyhow::{Context, Result};
 use std::io::Write;
