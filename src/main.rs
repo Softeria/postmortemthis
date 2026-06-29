@@ -1,6 +1,4 @@
 mod agents;
-mod gemshim;
-mod gemshim_server;
 mod gg;
 mod login;
 mod openrouter;
@@ -41,10 +39,6 @@ enum Cmd {
     Login,
     /// Show which agent CLIs are installed and authenticated.
     Doctor,
-    /// Internal: run the Gemini->OpenRouter bridge server. Spawned by the tool
-    /// itself; not for direct use.
-    #[command(name = "__gemshim", hide = true)]
-    Gemshim,
 }
 
 #[derive(clap::Args, Default)]
@@ -88,10 +82,6 @@ fn main() -> Result<()> {
     match cli.command {
         Some(Cmd::Login) => login::run(),
         Some(Cmd::Doctor) => doctor(),
-        Some(Cmd::Gemshim) => {
-            gemshim_server::run();
-            Ok(())
-        }
         None => run(cli.run),
     }
 }
@@ -145,7 +135,6 @@ fn run(args: RunArgs) -> Result<()> {
         }
     }
 
-    let _bridge = start_gemini_bridge(&selected);
     let _vibe = start_vibe_home(&selected);
 
     eprintln!(
@@ -283,7 +272,7 @@ fn doctor() -> Result<()> {
         }
     }
     if !any {
-        println!("\nNo agent CLIs found. Install one of claude, codex, gemini, or run");
+        println!("\nNo agent CLIs found. Install one of claude, codex, antigravity, or run");
         println!("postmortemthis through postmortemthis.cmd, which bootstraps them itself.");
     }
     Ok(())
@@ -295,7 +284,7 @@ fn parse_agents(names: &[String]) -> Result<Vec<Agent>> {
         .iter()
         .map(|s| {
             Agent::from_name(s).ok_or_else(|| {
-                anyhow::anyhow!("unknown agent '{s}' (known: claude, codex, gemini, qwen, vibe)")
+                anyhow::anyhow!("unknown agent '{s}' (known: claude, codex, antigravity, qwen, vibe)")
             })
         })
         .collect()
@@ -317,8 +306,15 @@ fn select_agents(requested: &[String]) -> Result<Vec<Agent>> {
         match agent.via() {
             Some(Via::Native) => selected.push(agent),
             // Auto-pick a gg-bootstrapped agent only if it can actually run:
-            // own login, or an OpenRouter key. An explicit --agents overrides.
-            Some(Via::Gg) if explicit || agent.authed() || openrouter::key().is_some() => {
+            // own login, or an OpenRouter key it can actually use. The key
+            // check is gated on supports_openrouter() so a native-only agent
+            // (antigravity) is not auto-selected on key-presence alone, only to
+            // fail with an empty attempt plan. An explicit --agents overrides.
+            Some(Via::Gg)
+                if explicit
+                    || agent.authed()
+                    || (openrouter::key().is_some() && agent.supports_openrouter()) =>
+            {
                 selected.push(agent)
             }
             Some(Via::Gg) => eprintln!(
@@ -361,29 +357,6 @@ fn prewarm(selected: &[Agent], dir: &std::path::Path) {
         Ok(s) if s.success() => {}
         Ok(s) => eprintln!("postmortemthis: gg prewarm exited with {s}; continuing"),
         Err(e) => eprintln!("postmortemthis: gg prewarm failed: {e}; continuing"),
-    }
-}
-
-/// Bring up the gemshim bridge when the Gemini leg will run on OpenRouter
-/// (Gemini selected and an OpenRouter key is present). Held for the run.
-fn start_gemini_bridge(selected: &[Agent]) -> Option<gemshim::Bridge> {
-    let needs_bridge = selected.contains(&Agent::Gemini) && openrouter::key().is_some();
-    if !needs_bridge {
-        return None;
-    }
-    let key = openrouter::key()?;
-    match gemshim::Bridge::start(key, Agent::Gemini.openrouter_model()) {
-        Ok(bridge) => {
-            eprintln!(
-                "postmortemthis: gemini -> OpenRouter via local gemshim bridge (127.0.0.1:{})",
-                bridge.port()
-            );
-            Some(bridge)
-        }
-        Err(e) => {
-            eprintln!("postmortemthis: could not start gemini bridge ({e}); the gemini leg will fail");
-            None
-        }
     }
 }
 

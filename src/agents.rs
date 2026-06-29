@@ -1,4 +1,3 @@
-use crate::gemshim;
 use crate::gg;
 use crate::openrouter;
 use crate::vibe;
@@ -12,7 +11,7 @@ use std::sync::OnceLock;
 pub enum Agent {
     Claude,
     Codex,
-    Gemini,
+    Antigravity,
     Qwen,
     Vibe,
 }
@@ -20,7 +19,7 @@ pub enum Agent {
 pub const ALL: [Agent; 5] = [
     Agent::Claude,
     Agent::Codex,
-    Agent::Gemini,
+    Agent::Antigravity,
     Agent::Qwen,
     Agent::Vibe,
 ];
@@ -55,7 +54,7 @@ impl Agent {
         match self {
             Agent::Claude => "claude",
             Agent::Codex => "codex",
-            Agent::Gemini => "gemini",
+            Agent::Antigravity => "antigravity",
             Agent::Qwen => "qwen",
             Agent::Vibe => "vibe",
         }
@@ -67,13 +66,13 @@ impl Agent {
         !matches!(self, Agent::Vibe)
     }
 
-    /// The tool name in gg's registry (gemini's binary is `gemini`, but the
-    /// gg tool is `gemini-cli`).
+    /// The tool name in gg's registry. Antigravity is not a short alias in the
+    /// registry; it is pulled straight from its GitHub release repo.
     pub fn gg_tool(&self) -> &'static str {
         match self {
             Agent::Claude => "claude",
             Agent::Codex => "codex",
-            Agent::Gemini => "gemini-cli",
+            Agent::Antigravity => "gh/google-antigravity/antigravity-cli",
             Agent::Qwen => "qwen",
             Agent::Vibe => "vibe",
         }
@@ -86,9 +85,11 @@ impl Agent {
         match self {
             Agent::Claude => "anthropic/claude-sonnet-4.6",
             Agent::Codex => "openai/gpt-5",
-            Agent::Gemini => "google/gemini-3.1-pro-preview",
             Agent::Qwen => "qwen/qwen3-coder",
             Agent::Vibe => "mistralai/mistral-medium-3.1",
+            // Antigravity is native-only (no OpenRouter route), so this is
+            // never used for provenance; kept honest in case it ever leaks.
+            Agent::Antigravity => "native-only (no OpenRouter)",
         }
     }
 
@@ -99,7 +100,7 @@ impl Agent {
         match self {
             Agent::Claude => "run `claude` once to refresh its login",
             Agent::Codex => "run `codex login` to refresh its login",
-            Agent::Gemini => "set GEMINI_API_KEY (gemini's Google OAuth cannot run headless)",
+            Agent::Antigravity => "run `antigravity` once to refresh its Google login",
             Agent::Qwen | Agent::Vibe => "no native login; runs on OpenRouter",
         }
     }
@@ -108,7 +109,7 @@ impl Agent {
         match s.trim().to_lowercase().as_str() {
             "claude" | "claude-code" => Some(Agent::Claude),
             "codex" => Some(Agent::Codex),
-            "gemini" | "gemini-cli" => Some(Agent::Gemini),
+            "antigravity" | "antigravity-cli" => Some(Agent::Antigravity),
             "qwen" | "qwen-code" => Some(Agent::Qwen),
             "vibe" | "mistral-vibe" => Some(Agent::Vibe),
             _ => None,
@@ -165,10 +166,20 @@ impl Agent {
                 ]);
                 a
             }
-            // Read-only: default approval denies tools that need it (shell,
-            // edits) in a headless session, while file reads still work; also
-            // skip the folder-trust prompt.
-            Agent::Gemini => vec!["--skip-trust", "--approval-mode", "default"],
+            // -p -: single-prompt headless mode reading the prompt from stdin
+            // (the `-` operand), like the other stdin agents - so the large,
+            // multiline review prompt is never passed as a CLI argument (which
+            // Windows .cmd shims reject and argv limits truncate).
+            // Read-only rests on the print-mode default: WITHOUT
+            // --dangerously-skip-permissions, any write tool is diverted into
+            // Antigravity's own scratch dir and never touches the workspace
+            // (verified empirically), while file reads and read-only git run
+            // against the real cwd. The explicit `--sandbox` flag is
+            // deliberately NOT used: it hangs headless `-p` runs until the
+            // print-timeout fires. --print-timeout is parked far above any
+            // realistic outer --timeout so postmortemthis's own timeout governs,
+            // not Antigravity's 5m print-mode default.
+            Agent::Antigravity => vec!["--print-timeout", "24h", "-p", "-"],
             // Qwen Code is a Gemini-CLI fork: same read-only approval model.
             // --auth-type openai pins it to the OpenAI-compatible endpoint
             // (the OPENAI_* env points that at OpenRouter); the prompt is read
@@ -220,21 +231,23 @@ impl Agent {
         plan
     }
 
-    /// Can this agent reach OpenRouter in principle? All three can: Claude via
-    /// the Anthropic Messages endpoint, Codex via the Responses endpoint, and
-    /// Gemini via the gemshim bridge. Used to decide whether an un-authed
+    /// Can this agent reach OpenRouter in principle? Most can: Claude via the
+    /// Anthropic Messages endpoint, Codex via the Responses endpoint, Qwen and
+    /// Vibe via OpenAI-compatible endpoints. Antigravity cannot - it is a
+    /// closed-source CLI bound to Google's own backend, with no endpoint to
+    /// repoint - so it is native-login only. Used to decide whether an un-authed
     /// agent is worth selecting when an OpenRouter key is present.
     pub fn supports_openrouter(&self) -> bool {
-        true
+        !matches!(self, Agent::Antigravity)
     }
 
     /// Can this agent reach OpenRouter *right now*? Same as
-    /// `supports_openrouter`, except Gemini additionally needs the gemshim
-    /// bridge to be running (main.rs starts it before the fan-out).
+    /// `supports_openrouter`, except Vibe additionally needs its scratch
+    /// VIBE_HOME to be written (main.rs prepares it before the fan-out).
     fn openrouter_capable(&self) -> bool {
         match self {
             Agent::Claude | Agent::Codex | Agent::Qwen => true,
-            Agent::Gemini => gemshim::endpoint().is_some(),
+            Agent::Antigravity => false,
             Agent::Vibe => vibe::home().is_some(),
         }
     }
@@ -256,28 +269,9 @@ impl Agent {
                 ("MAX_THINKING_TOKENS", "0".into()),
             ],
             Agent::Codex => vec![("OPENROUTER_API_KEY", key.to_string())],
-            // Gemini routes through the local gemshim bridge: HOME is the
-            // throwaway dir holding the auth + read-only-git policy, and the
-            // CLI is pointed at gemshim (which holds the real OpenRouter key,
-            // so the key handed to the CLI is an ignored dummy).
-            Agent::Gemini => match gemshim::endpoint() {
-                Some((port, home)) => {
-                    let home = home.to_string_lossy().into_owned();
-                    vec![
-                        ("HOME", home.clone()),
-                        ("USERPROFILE", home),
-                        // Redirecting HOME would also move gg's tool cache
-                        // (default $HOME/.cache/gg) into the throwaway dir,
-                        // forcing a full gemini-cli reinstall on every run.
-                        // Pin it back to the real cache.
-                        ("GG_CACHE_DIR", gg_cache_dir()),
-                        ("GEMINI_API_KEY", "gemshim-substitutes-the-real-key".into()),
-                        ("GOOGLE_GEMINI_BASE_URL", format!("http://127.0.0.1:{port}")),
-                        ("GEMINI_CLI_TRUST_WORKSPACE", "true".into()),
-                    ]
-                }
-                None => vec![],
-            },
+            // Antigravity has no OpenRouter route (native-login only), so it is
+            // never run with `openrouter` set - no env to inject.
+            Agent::Antigravity => vec![],
             // Qwen Code speaks the OpenAI-compatible API directly, so it needs
             // no bridge: point its OpenAI client at OpenRouter on the key.
             Agent::Qwen => vec![
@@ -376,11 +370,11 @@ impl Agent {
                     || claude_keychain_auth()
             }
             Agent::Codex => exists(".codex/auth.json") || env_set("OPENAI_API_KEY"),
-            // Gemini's free Google-OAuth login (oauth_creds.json) is
-            // interactive and cannot run headless, so it does not count: only
-            // a real API key is headless-usable. Without one, an OpenRouter
-            // key routes Gemini through the gemshim bridge instead.
-            Agent::Gemini => env_set("GEMINI_API_KEY") || env_set("GOOGLE_API_KEY"),
+            // Antigravity logs in with a Google account saved under ~/.gemini
+            // (the dir it shares with the legacy gemini CLI) and, unlike the old
+            // gemini-cli, runs that login headless - so the saved account is
+            // usable auth on its own, no API key required.
+            Agent::Antigravity => exists(".gemini/google_accounts.json"),
             // Qwen and Vibe have no widely-held native login wired up; they
             // run through OpenRouter when a key is present (see attempt_plan).
             Agent::Qwen | Agent::Vibe => false,
@@ -392,15 +386,11 @@ impl Agent {
             match self {
                 Agent::Claude => "logged in (subscription or API)".into(),
                 Agent::Codex => "logged in".into(),
-                Agent::Gemini => "API key set".into(),
+                Agent::Antigravity => "logged in (Google account)".into(),
                 Agent::Qwen | Agent::Vibe => "logged in".into(),
             }
         } else if matches!(self, Agent::Qwen | Agent::Vibe) {
             "runs via OpenRouter (needs a key; no native login wired up)".into()
-        } else if matches!(self, Agent::Gemini) && gemini_oauth_present() {
-            "Google OAuth login found, but it cannot run headless - set \
-             GEMINI_API_KEY or pass an OpenRouter key"
-                .into()
         } else {
             format!(
                 "no credentials found - run `{}` once to log in",
@@ -408,32 +398,6 @@ impl Agent {
             )
         }
     }
-}
-
-/// gg's tool cache, so it survives a redirected HOME on the gemini leg:
-/// `$GG_CACHE_DIR` if set, else the default `$HOME/.cache/gg`. Read while the
-/// real HOME is still in scope (the override applies only to the child).
-fn gg_cache_dir() -> String {
-    if let Some(v) = std::env::var_os("GG_CACHE_DIR") {
-        return v.to_string_lossy().into_owned();
-    }
-    let home = std::env::var("HOME")
-        .or_else(|_| std::env::var("USERPROFILE"))
-        .unwrap_or_default();
-    Path::new(&home)
-        .join(".cache")
-        .join("gg")
-        .to_string_lossy()
-        .into_owned()
-}
-
-/// Is a Gemini Google-OAuth login on disk? Used only to explain that it is
-/// present but unusable headless; it is deliberately not counted by `authed`.
-fn gemini_oauth_present() -> bool {
-    let home = std::env::var("HOME")
-        .or_else(|_| std::env::var("USERPROFILE"))
-        .unwrap_or_default();
-    Path::new(&home).join(".gemini/oauth_creds.json").exists()
 }
 
 /// Claude Code on macOS stores OAuth credentials in the Keychain, not in

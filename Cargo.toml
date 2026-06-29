@@ -15,10 +15,12 @@ path = "src/main.rs"
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
 wait-timeout = "0.2"
-# Used only by the hidden `__gemshim` bridge subcommand. The normal launcher
-# path never starts a runtime; tokio spins up only when that subcommand runs.
-tokio = { version = "1", features = ["rt-multi-thread", "net", "time"] }
-axum = "0.7"
+# `postmortemthis login` runs the OpenRouter token exchange on a small async
+# runtime; the normal launcher path never starts one. `net` is needed for the
+# IO driver reqwest's HTTP call drives under `block_on`/`enable_all` - reqwest
+# pulls it in transitively too, but declare it so this manifest is honest about
+# what it relies on.
+tokio = { version = "1", features = ["rt", "net", "time"] }
 reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
 serde_json = "1"
 # `postmortemthis login`: PKCE OAuth against OpenRouter (verifier randomness, the
