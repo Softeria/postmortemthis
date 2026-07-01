@@ -209,16 +209,23 @@ impl Agent {
         }
     }
 
+    /// The base command that reaches this agent's CLI - through gg when a gg is
+    /// available, else the native binary on PATH. Callers layer their own args
+    /// on top (`command` for a review, `login_command` for a login).
+    fn base_command(&self) -> Command {
+        match self.via() {
+            Some(Via::Gg) => gg::locate().expect("via() said gg").tool(self.gg_tool()),
+            // Native, or unresolved (let the spawn error surface).
+            _ => Command::new(self.native_bin()),
+        }
+    }
+
     /// Build the review command, via the native CLI or through gg. When
     /// `openrouter` is set, the CLI is pointed at OpenRouter on the resolved
     /// key; otherwise it runs on the user's own login. The caller pipes the
     /// prompt to stdin.
     pub fn command(&self, repo: &Path, openrouter: bool) -> Command {
-        let mut cmd = match self.via() {
-            Some(Via::Gg) => gg::locate().expect("via() said gg").tool(self.gg_tool()),
-            // Native, or unresolved (let the spawn error surface).
-            _ => Command::new(self.native_bin()),
-        };
+        let mut cmd = self.base_command();
         cmd.args(self.args(openrouter));
         cmd.current_dir(repo);
         if openrouter && let Some(key) = openrouter::key() {
@@ -246,25 +253,70 @@ impl Agent {
         plan
     }
 
-    /// Can this agent reach OpenRouter in principle? Most can: Claude via the
-    /// Anthropic Messages endpoint, Codex via the Responses endpoint, Qwen and
-    /// Vibe via OpenAI-compatible endpoints. Antigravity and Grok cannot - they
-    /// are closed-source CLIs bound to their vendor's own backend, with no
-    /// endpoint to repoint - so they are native-login only. Used to decide
-    /// whether an un-authed agent is worth selecting when a key is present.
-    pub fn supports_openrouter(&self) -> bool {
-        !matches!(self, Agent::Antigravity | Agent::Grok)
+    /// A native-only agent is a closed-source CLI bound to its vendor's own
+    /// backend with no endpoint to repoint at OpenRouter (Antigravity -> Google,
+    /// Grok -> xAI). The single source of truth for "has no OpenRouter route";
+    /// every OpenRouter capability below derives from it.
+    pub fn is_native_only(&self) -> bool {
+        matches!(self, Agent::Antigravity | Agent::Grok)
     }
 
-    /// Can this agent reach OpenRouter *right now*? Same as
-    /// `supports_openrouter`, except Vibe additionally needs its scratch
-    /// VIBE_HOME to be written (main.rs prepares it before the fan-out).
+    /// Can this agent reach OpenRouter in principle? Most can: Claude via the
+    /// Anthropic Messages endpoint, Codex via the Responses endpoint, Qwen and
+    /// Vibe via OpenAI-compatible endpoints; native-only agents cannot. Used to
+    /// decide whether an un-authed agent is worth selecting when a key is present.
+    pub fn supports_openrouter(&self) -> bool {
+        !self.is_native_only()
+    }
+
+    /// Does this agent have a native login worth offering in `setup`? Derived
+    /// from `login_invocation` so the set lives in exactly one place: qwen and
+    /// vibe have no login (they only ever run on OpenRouter); the rest do.
+    pub fn has_native_login(&self) -> bool {
+        self.login_invocation().is_some()
+    }
+
+    /// A short vendor label, for `setup` display.
+    pub fn vendor(&self) -> &'static str {
+        match self {
+            Agent::Claude => "Anthropic",
+            Agent::Codex => "OpenAI",
+            Agent::Antigravity => "Google",
+            Agent::Qwen => "Alibaba",
+            Agent::Vibe => "Mistral",
+            Agent::Grok => "xAI",
+        }
+    }
+
+    /// Can this agent reach OpenRouter *right now*? As `supports_openrouter`,
+    /// except Vibe additionally needs its scratch VIBE_HOME to be written
+    /// (main.rs prepares it before the fan-out).
     fn openrouter_capable(&self) -> bool {
         match self {
-            Agent::Claude | Agent::Codex | Agent::Qwen => true,
-            Agent::Antigravity | Agent::Grok => false,
             Agent::Vibe => vibe::home().is_some(),
+            _ => self.supports_openrouter(),
         }
+    }
+
+    /// Args that run this agent's interactive login, or None when it has none.
+    /// Some CLIs have a dedicated subcommand (`codex login`, `grok login`);
+    /// claude and antigravity prompt on a bare interactive launch instead.
+    fn login_invocation(&self) -> Option<&'static [&'static str]> {
+        match self {
+            Agent::Claude | Agent::Antigravity => Some(&[]),
+            Agent::Codex | Agent::Grok => Some(&["login"]),
+            Agent::Qwen | Agent::Vibe => None,
+        }
+    }
+
+    /// A command that runs this agent's login interactively, via gg or the
+    /// native binary. None when the agent has no native login. The caller
+    /// inherits the terminal and waits for it to exit.
+    pub fn login_command(&self) -> Option<Command> {
+        let args = self.login_invocation()?;
+        let mut cmd = self.base_command();
+        cmd.args(args);
+        Some(cmd)
     }
 
     /// Provider env that points this agent's CLI at OpenRouter on `key`.
