@@ -27,10 +27,13 @@ That prompt is the whole install — your agent writes the skill from it. **Twea
 
 Your own logins where you have them. For the rest, `sh postmortemthis.cmd login` (OpenRouter OAuth) or set `OPENROUTER_API_KEY`. Usage bills to your account; this resells nothing.
 
+Run `sh postmortemthis.cmd setup` for a guided pass over every agent — it pokes each one, then lets you log in (many have a free or already-paid tier), force OpenRouter, or disable it, and can fire a test prompt at the end. Choices are saved and honored on every run.
+
 ## CLI
 
 ```
 echo "review the pending diff for bugs" | sh postmortemthis.cmd   # all agents
+sh postmortemthis.cmd setup                                       # configure each agent
 sh postmortemthis.cmd doctor                                      # what's available
 ```
 

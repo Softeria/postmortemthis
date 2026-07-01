@@ -3,6 +3,8 @@ mod gg;
 mod login;
 mod openrouter;
 mod runner;
+mod settings;
+mod setup;
 mod vibe;
 
 use agents::{Agent, Via};
@@ -10,7 +12,7 @@ use anyhow::{Result, bail};
 use clap::{Parser, Subcommand};
 use runner::{Outcome, Report};
 use std::io::Read;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 /// Version reported by `--version`: the git tag baked in at release build
@@ -39,6 +41,9 @@ enum Cmd {
     Login,
     /// Show which agent CLIs are installed and authenticated.
     Doctor,
+    /// Interactively configure each agent (keep, log in, force OpenRouter, or
+    /// disable) and optionally fire a test prompt. Saved to agents.json.
+    Setup,
 }
 
 #[derive(clap::Args, Default)]
@@ -82,6 +87,7 @@ fn main() -> Result<()> {
     match cli.command {
         Some(Cmd::Login) => login::run(),
         Some(Cmd::Doctor) => doctor(),
+        Some(Cmd::Setup) => setup::run(),
         None => run(cli.run),
     }
 }
@@ -101,8 +107,8 @@ fn run(args: RunArgs) -> Result<()> {
         bail!("no prompt (pass it as an argument or pipe it on stdin)");
     }
 
-    let selected = select_agents(&args.agents)?;
-    let skip_native = parse_agents(&args.skip_native)?;
+    let settings = settings::Settings::load();
+    let (selected, skip_native) = plan_run(&args.agents, &args.skip_native, &settings)?;
     let cwd = std::env::current_dir()?;
     let timeout = Duration::from_secs(args.timeout);
 
@@ -135,17 +141,13 @@ fn run(args: RunArgs) -> Result<()> {
         }
     }
 
-    let _vibe = start_vibe_home(&selected);
-
     eprintln!(
         "postmortemthis: running {} agent(s) in parallel: {}",
         selected.len(),
         selected.iter().map(|a| a.name()).collect::<Vec<_>>().join(", ")
     );
 
-    prewarm(&selected, &cwd);
-
-    let reports = runner::run_all(&selected, &prompt, &cwd, timeout, &skip_native)?;
+    let reports = execute(&selected, &skip_native, &prompt, &cwd, timeout)?;
 
     // When --out is set, write each agent's output to a file and print the
     // paths first, so they survive even if the stdout body is later truncated
@@ -164,7 +166,7 @@ fn run(args: RunArgs) -> Result<()> {
         print!("\n\n{}", report_section(r));
     }
 
-    let notes = run_notes(&reports, &selected);
+    let notes = run_notes(&reports, &selected, &settings);
     if !notes.is_empty() {
         print!(
             "\n\n---\n\n# postmortemthis run notes (operational; not part of the review)\n\n{}\n",
@@ -199,7 +201,7 @@ fn report_section(r: &Report) -> String {
 /// Operational notes for the calling agent: what it can fix or change on a
 /// later run. Empty when there is nothing worth saying. Kept terse and
 /// imperative because the consumer is an LLM composing the next command.
-fn run_notes(reports: &[Report], selected: &[Agent]) -> Vec<String> {
+fn run_notes(reports: &[Report], selected: &[Agent], settings: &settings::Settings) -> Vec<String> {
     let mut notes = Vec::new();
 
     for r in reports {
@@ -226,6 +228,10 @@ fn run_notes(reports: &[Report], selected: &[Agent]) -> Vec<String> {
     let has_key = openrouter::key().is_some();
     for agent in agents::ALL {
         let runnable_via_key = has_key && agent.supports_openrouter();
+        // Don't nag about an agent the user deliberately disabled in setup.
+        if settings.mode(agent) == settings::Mode::Disabled {
+            continue;
+        }
         if agent.via().is_some()
             && !selected.contains(&agent)
             && !agent.authed()
@@ -245,6 +251,7 @@ fn run_notes(reports: &[Report], selected: &[Agent]) -> Vec<String> {
 
 fn doctor() -> Result<()> {
     openrouter::init(None);
+    let settings = settings::Settings::load();
     println!("postmortemthis doctor\n");
     match gg::locate() {
         Some(gg) => println!("  bootstrap: {}", gg.path().display()),
@@ -266,15 +273,22 @@ fn doctor() -> Result<()> {
             (false, true) => "via OpenRouter key".to_string(),
             (false, false) => agent.auth_hint(),
         };
+        // Surface a non-default setup choice (disabled / forced OpenRouter) so
+        // the user can see their `setup` preferences took effect.
+        let mode = settings.mode(agent);
+        let tag = match mode {
+            settings::Mode::Auto => String::new(),
+            m => format!("  [{}]", m.label()),
+        };
         match agent.via() {
             Some(Via::Native) => {
                 any = true;
-                println!("  + {:<8} {}", agent.name(), agent.native_version().unwrap_or_default());
+                println!("  + {:<8} {}{tag}", agent.name(), agent.native_version().unwrap_or_default());
                 println!("    auth: {auth}");
             }
             Some(Via::Gg) => {
                 any = true;
-                println!("  + {:<8} bootstrapped on first run", agent.name());
+                println!("  + {:<8} bootstrapped on first run{tag}", agent.name());
                 println!("    auth: {auth}");
             }
             None => println!("  x {:<8} not found", agent.name()),
@@ -301,13 +315,75 @@ fn parse_agents(names: &[String]) -> Result<Vec<Agent>> {
         .collect()
 }
 
-fn select_agents(requested: &[String]) -> Result<Vec<Agent>> {
+/// Resolve the agents to run and the effective skip-native set, honouring the
+/// saved setup preferences: a forced-OpenRouter agent (Mode::Openrouter) joins
+/// the skip-native set so it never tries its native login. Disabling is applied
+/// inside `select_agents` (it only affects a default, non-explicit run).
+fn plan_run(
+    requested: &[String],
+    user_skip: &[String],
+    settings: &settings::Settings,
+) -> Result<(Vec<Agent>, Vec<Agent>)> {
+    let selected = select_agents(requested, settings)?;
+    let mut skip = parse_agents(user_skip)?;
+    // Force-OpenRouter is best-effort: only drop the native login when OpenRouter
+    // is actually reachable (a key is present and the agent supports it).
+    // Otherwise leave the native login in play - forcing a route that can't run
+    // would turn a working agent into a guaranteed empty-plan failure every run.
+    let or_reachable = openrouter::key().is_some();
+    for &agent in &selected {
+        if settings.mode(agent) == settings::Mode::Openrouter
+            && or_reachable
+            && agent.supports_openrouter()
+            && !skip.contains(&agent)
+        {
+            skip.push(agent);
+        }
+    }
+    Ok((selected, skip))
+}
+
+/// Bring up per-run scratch state (Vibe's VIBE_HOME), prewarm the gg tools, and
+/// fan out. Shared by `run` and `setup`'s test so both take the same path; the
+/// Vibe home guard is held until run_all returns.
+fn execute(
+    selected: &[Agent],
+    skip_native: &[Agent],
+    prompt: &str,
+    cwd: &Path,
+    timeout: Duration,
+) -> Result<Vec<Report>> {
+    let _vibe = start_vibe_home(selected);
+    prewarm(selected, cwd);
+    runner::run_all(selected, prompt, cwd, timeout, skip_native)
+}
+
+fn select_agents(requested: &[String], settings: &settings::Settings) -> Result<Vec<Agent>> {
     let explicit = !requested.is_empty();
-    let candidates: Vec<Agent> = if requested.is_empty() {
-        agents::ALL.to_vec()
-    } else {
+    let requested_agents = if explicit {
         parse_agents(requested)?
+    } else {
+        agents::ALL.to_vec()
     };
+    // Drop agents disabled in `setup` - authoritatively, even when named on an
+    // explicit --agents list. "Disable" means "never run this"; since the skill
+    // passes an explicit list on nearly every run, an override there would make
+    // disable a silent no-op. Note it when an explicitly-named agent is dropped.
+    let candidates: Vec<Agent> = requested_agents
+        .into_iter()
+        .filter(|a| {
+            if settings.mode(*a) == settings::Mode::Disabled {
+                if explicit {
+                    eprintln!(
+                        "postmortemthis: skipping {} (disabled in setup - run `postmortemthis setup` to re-enable)",
+                        a.name()
+                    );
+                }
+                return false;
+            }
+            true
+        })
+        .collect();
 
     let mut selected: Vec<Agent> = Vec::new();
     for agent in candidates {
@@ -348,7 +424,10 @@ fn select_agents(requested: &[String]) -> Result<Vec<Agent>> {
         }
     }
     if selected.is_empty() {
-        bail!("no agent CLIs available - run `postmortemthis doctor`");
+        bail!(
+            "no agents to run - none are installed with usable credentials, or all \
+             selected agents are disabled in setup (run `postmortemthis doctor` or `setup`)"
+        );
     }
     Ok(selected)
 }
