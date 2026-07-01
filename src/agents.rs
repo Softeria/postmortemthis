@@ -14,14 +14,16 @@ pub enum Agent {
     Antigravity,
     Qwen,
     Vibe,
+    Grok,
 }
 
-pub const ALL: [Agent; 5] = [
+pub const ALL: [Agent; 6] = [
     Agent::Claude,
     Agent::Codex,
     Agent::Antigravity,
     Agent::Qwen,
     Agent::Vibe,
+    Agent::Grok,
 ];
 
 /// Codex `-c` overrides that define OpenRouter as a custom model provider -
@@ -57,17 +59,19 @@ impl Agent {
             Agent::Antigravity => "antigravity",
             Agent::Qwen => "qwen",
             Agent::Vibe => "vibe",
+            Agent::Grok => "grok",
         }
     }
 
-    /// Does this agent take the prompt on stdin? All do except vibe, which
-    /// wants it as a command-line argument (appended by the runner).
+    /// Does this agent take the prompt on stdin? Most do; vibe and grok want it
+    /// as a command-line argument (the value of `-p`, appended by the runner).
     pub fn reads_stdin(&self) -> bool {
-        !matches!(self, Agent::Vibe)
+        !matches!(self, Agent::Vibe | Agent::Grok)
     }
 
-    /// The tool name in gg's registry. Antigravity is not a short alias in the
-    /// registry; it is pulled straight from its GitHub release repo.
+    /// The tool name in gg's registry. Antigravity is pulled straight from its
+    /// GitHub release repo (no short alias); grok is the `grok` tool added in
+    /// gg 187, which bootstraps the @xai-official/grok npm package.
     pub fn gg_tool(&self) -> &'static str {
         match self {
             Agent::Claude => "claude",
@@ -75,6 +79,7 @@ impl Agent {
             Agent::Antigravity => "gh/google-antigravity/antigravity-cli",
             Agent::Qwen => "qwen",
             Agent::Vibe => "vibe",
+            Agent::Grok => "grok",
         }
     }
 
@@ -87,9 +92,9 @@ impl Agent {
             Agent::Codex => "openai/gpt-5",
             Agent::Qwen => "qwen/qwen3-coder",
             Agent::Vibe => "mistralai/mistral-medium-3.1",
-            // Antigravity is native-only (no OpenRouter route), so this is
-            // never used for provenance; kept honest in case it ever leaks.
-            Agent::Antigravity => "native-only (no OpenRouter)",
+            // Antigravity and Grok are native-only (no OpenRouter route), so
+            // this is never used for provenance; kept honest in case it leaks.
+            Agent::Antigravity | Agent::Grok => "native-only (no OpenRouter)",
         }
     }
 
@@ -101,6 +106,7 @@ impl Agent {
             Agent::Claude => "run `claude` once to refresh its login",
             Agent::Codex => "run `codex login` to refresh its login",
             Agent::Antigravity => "run `antigravity` once to refresh its Google login",
+            Agent::Grok => "set XAI_API_KEY (headless auth; get one at console.x.ai)",
             Agent::Qwen | Agent::Vibe => "no native login; runs on OpenRouter",
         }
     }
@@ -112,6 +118,7 @@ impl Agent {
             "antigravity" | "antigravity-cli" => Some(Agent::Antigravity),
             "qwen" | "qwen-code" => Some(Agent::Qwen),
             "vibe" | "mistral-vibe" => Some(Agent::Vibe),
+            "grok" | "grok-build" => Some(Agent::Grok),
             _ => None,
         }
     }
@@ -191,6 +198,14 @@ impl Agent {
             // The `plan` builtin agent is read-only (no edits); --trust skips
             // the folder-trust prompt. Provider/model come from VIBE_HOME.
             Agent::Vibe => vec!["--agent", "plan", "--trust", "--output", "text", "-p"],
+            // Grok Build's permission model mirrors Claude's: `--permission-mode
+            // dontAsk` auto-denies any tool that needs approval (writes, edits,
+            // arbitrary shell) while read-only tools (read_file, list_dir, grep,
+            // web_search, and a curated set of safe shell) stay auto-approved, so
+            // the model can read the diff and answer but cannot mutate the tree.
+            // `-p` (alias --single) takes the prompt as its value, not on stdin,
+            // so it goes last and the runner appends the prompt (see reads_stdin).
+            Agent::Grok => vec!["--permission-mode", "dontAsk", "-p"],
         }
     }
 
@@ -233,12 +248,12 @@ impl Agent {
 
     /// Can this agent reach OpenRouter in principle? Most can: Claude via the
     /// Anthropic Messages endpoint, Codex via the Responses endpoint, Qwen and
-    /// Vibe via OpenAI-compatible endpoints. Antigravity cannot - it is a
-    /// closed-source CLI bound to Google's own backend, with no endpoint to
-    /// repoint - so it is native-login only. Used to decide whether an un-authed
-    /// agent is worth selecting when an OpenRouter key is present.
+    /// Vibe via OpenAI-compatible endpoints. Antigravity and Grok cannot - they
+    /// are closed-source CLIs bound to their vendor's own backend, with no
+    /// endpoint to repoint - so they are native-login only. Used to decide
+    /// whether an un-authed agent is worth selecting when a key is present.
     pub fn supports_openrouter(&self) -> bool {
-        !matches!(self, Agent::Antigravity)
+        !matches!(self, Agent::Antigravity | Agent::Grok)
     }
 
     /// Can this agent reach OpenRouter *right now*? Same as
@@ -247,7 +262,7 @@ impl Agent {
     fn openrouter_capable(&self) -> bool {
         match self {
             Agent::Claude | Agent::Codex | Agent::Qwen => true,
-            Agent::Antigravity => false,
+            Agent::Antigravity | Agent::Grok => false,
             Agent::Vibe => vibe::home().is_some(),
         }
     }
@@ -269,9 +284,9 @@ impl Agent {
                 ("MAX_THINKING_TOKENS", "0".into()),
             ],
             Agent::Codex => vec![("OPENROUTER_API_KEY", key.to_string())],
-            // Antigravity has no OpenRouter route (native-login only), so it is
-            // never run with `openrouter` set - no env to inject.
-            Agent::Antigravity => vec![],
+            // Antigravity and Grok have no OpenRouter route (native-login only),
+            // so they are never run with `openrouter` set - no env to inject.
+            Agent::Antigravity | Agent::Grok => vec![],
             // Qwen Code speaks the OpenAI-compatible API directly, so it needs
             // no bridge: point its OpenAI client at OpenRouter on the key.
             Agent::Qwen => vec![
@@ -299,7 +314,8 @@ impl Agent {
     /// explicit. The probes are node startups (~1s each), so they must not
     /// run once per call site.
     fn native_probe(&self) -> Option<&'static (String, String)> {
-        static CACHE: [OnceLock<Option<(String, String)>>; 5] = [
+        static CACHE: [OnceLock<Option<(String, String)>>; ALL.len()] = [
+            OnceLock::new(),
             OnceLock::new(),
             OnceLock::new(),
             OnceLock::new(),
@@ -375,6 +391,11 @@ impl Agent {
             // gemini-cli, runs that login headless - so the saved account is
             // usable auth on its own, no API key required.
             Agent::Antigravity => exists(".gemini/google_accounts.json"),
+            // Grok Build authenticates headless with an xAI API key
+            // (console.x.ai). Its browser OAuth caches credentials we don't
+            // probe, and the ~/.grok dir is created on install before any login
+            // (verified), so dir-existence is NOT an auth signal - only the key.
+            Agent::Grok => env_set("XAI_API_KEY"),
             // Qwen and Vibe have no widely-held native login wired up; they
             // run through OpenRouter when a key is present (see attempt_plan).
             Agent::Qwen | Agent::Vibe => false,
@@ -387,10 +408,15 @@ impl Agent {
                 Agent::Claude => "logged in (subscription or API)".into(),
                 Agent::Codex => "logged in".into(),
                 Agent::Antigravity => "logged in (Google account)".into(),
+                Agent::Grok => "XAI_API_KEY set".into(),
                 Agent::Qwen | Agent::Vibe => "logged in".into(),
             }
         } else if matches!(self, Agent::Qwen | Agent::Vibe) {
             "runs via OpenRouter (needs a key; no native login wired up)".into()
+        } else if matches!(self, Agent::Grok) {
+            // Grok headless auth is XAI_API_KEY; `grok login` (browser OAuth) is
+            // not probed and does not satisfy authed(), so don't suggest it here.
+            "no XAI_API_KEY set - headless auth needs a key from console.x.ai".into()
         } else {
             format!(
                 "no credentials found - run `{}` once to log in",

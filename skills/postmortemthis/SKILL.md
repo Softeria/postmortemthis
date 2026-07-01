@@ -1,6 +1,6 @@
 ---
 name: postmortemthis
-description: Fan one prompt across every coding agent on this machine (Claude Code, Codex, Antigravity, Qwen, Vibe) at once and synthesize their replies. A multi-agent second opinion on anything — a diff, an idea, a design, a question. Use when the user wants several agents to weigh in, asks for a "postmortem" or a second opinion, or runs /postmortemthis.
+description: Fan one prompt across every coding agent on this machine (Claude Code, Codex, Antigravity, Qwen, Vibe, Grok) at once and synthesize their replies. A multi-agent second opinion on anything — a diff, an idea, a design, a question. Use when the user wants several agents to weigh in, asks for a "postmortem" or a second opinion, or runs /postmortemthis.
 ---
 
 # postmortemthis

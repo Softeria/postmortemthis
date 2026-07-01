@@ -218,16 +218,25 @@ fn run_notes(reports: &[Report], selected: &[Agent]) -> Vec<String> {
         }
     }
 
-    // Agents that exist but were not run because they have no login and no key.
+    // Agents that exist but were not run for lack of usable credentials. An
+    // OpenRouter-capable agent is runnable whenever a key is present (whether or
+    // not it was requested), so flag it only when there is no key. A native-only
+    // agent (antigravity, grok) can't use the key at all, so flag it whenever it
+    // lacks its own login - even with a key set - and point it at that login.
     let has_key = openrouter::key().is_some();
-    if !has_key {
-        for agent in agents::ALL {
-            if agent.via().is_some() && !selected.contains(&agent) && !agent.authed() {
-                notes.push(format!(
-                    "- {}: skipped (no native login, no OpenRouter key). Run `postmortemthis login` or set OPENROUTER_API_KEY to include it.",
-                    agent.name()
-                ));
-            }
+    for agent in agents::ALL {
+        let runnable_via_key = has_key && agent.supports_openrouter();
+        if agent.via().is_some()
+            && !selected.contains(&agent)
+            && !agent.authed()
+            && !runnable_via_key
+        {
+            let fix = if agent.supports_openrouter() {
+                "Run `postmortemthis login` or set OPENROUTER_API_KEY to include it.".to_string()
+            } else {
+                format!("It is native-only: {}.", agent.native_fix_hint())
+            };
+            notes.push(format!("- {}: skipped (not logged in). {fix}", agent.name()));
         }
     }
 
@@ -272,8 +281,9 @@ fn doctor() -> Result<()> {
         }
     }
     if !any {
-        println!("\nNo agent CLIs found. Install one of claude, codex, antigravity, or run");
-        println!("postmortemthis through postmortemthis.cmd, which bootstraps them itself.");
+        let names = agents::ALL.iter().map(|a| a.name()).collect::<Vec<_>>().join(", ");
+        println!("\nNo agent CLIs found. Install one of: {names}. Or run postmortemthis");
+        println!("through postmortemthis.cmd, which bootstraps them itself.");
     }
     Ok(())
 }
@@ -284,7 +294,8 @@ fn parse_agents(names: &[String]) -> Result<Vec<Agent>> {
         .iter()
         .map(|s| {
             Agent::from_name(s).ok_or_else(|| {
-                anyhow::anyhow!("unknown agent '{s}' (known: claude, codex, antigravity, qwen, vibe)")
+                let known = agents::ALL.iter().map(|a| a.name()).collect::<Vec<_>>().join(", ");
+                anyhow::anyhow!("unknown agent '{s}' (known: {known})")
             })
         })
         .collect()
@@ -304,23 +315,31 @@ fn select_agents(requested: &[String]) -> Result<Vec<Agent>> {
             continue;
         }
         match agent.via() {
-            Some(Via::Native) => selected.push(agent),
-            // Auto-pick a gg-bootstrapped agent only if it can actually run:
-            // own login, or an OpenRouter key it can actually use. The key
-            // check is gated on supports_openrouter() so a native-only agent
-            // (antigravity) is not auto-selected on key-presence alone, only to
-            // fail with an empty attempt plan. An explicit --agents overrides.
-            Some(Via::Gg)
+            // Auto-pick an available agent (native on PATH or gg-bootstrappable)
+            // only if it can actually run: explicitly requested, its own login, or
+            // an OpenRouter key it can actually use. The key check is gated on
+            // supports_openrouter() so a native-only agent (antigravity, grok) is
+            // not auto-selected on key-presence alone only to fail with an empty
+            // attempt plan. Native and gg share this gate - otherwise an
+            // installed-but-logged-out native-only agent (grok) would be selected
+            // unconditionally and fail on every default run. --agents overrides.
+            Some(_)
                 if explicit
                     || agent.authed()
                     || (openrouter::key().is_some() && agent.supports_openrouter()) =>
             {
                 selected.push(agent)
             }
-            Some(Via::Gg) => eprintln!(
-                "postmortemthis: skipping {} (no credentials - log in once, or pass --key)",
-                agent.name()
-            ),
+            Some(_) => {
+                // Native-only agents (antigravity, grok) have no OpenRouter
+                // route, so --key can't help them - don't suggest it.
+                let how = if agent.supports_openrouter() {
+                    "log in once, or pass --key"
+                } else {
+                    "log in once (native-only; no --key fallback)"
+                };
+                eprintln!("postmortemthis: skipping {} (no credentials - {how})", agent.name());
+            }
             None if explicit => bail!(
                 "agent '{}' was requested but is not installed and no gg.cmd is available",
                 agent.name()
