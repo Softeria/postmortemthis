@@ -73,7 +73,7 @@
   <path d="M470,435 L458,440 L469,447 Z" fill="#34d399"/>
 
   <!-- ===== postmortemthis tool container ===== -->
-  <rect x="540" y="212" width="700" height="404" rx="20" fill="#0a1322" stroke="#243352"/>
+  <rect x="540" y="212" width="700" height="454" rx="20" fill="#0a1322" stroke="#243352"/>
   <text x="564" y="246" font-size="16" font-weight="800" fill="#e2e8f0">postmortemthis<tspan font-size="12" font-weight="400" fill="#7e8ca6">  the CLI Claude Code runs</tspan></text>
   <text x="564" y="266" font-size="11" fill="#5b6b85" letter-spacing="1.2">EVERY AGENT CLI  /  OWN TOOLS  /  OWN MODEL  /  READ-ONLY  /  IN PARALLEL</text>
 
@@ -128,6 +128,17 @@
   <text x="632" y="576" font-size="11" fill="#8da0bb">Mistral</text>
   <rect x="1078" y="550" width="124" height="24" rx="12" fill="#1a1207" stroke="#ff7000" stroke-opacity="0.4"/>
   <text x="1140" y="566" text-anchor="middle" font-size="12" fill="#ffc08a">Mistral Medium</text>
+
+  <!-- Grok -->
+  <rect x="566" y="598" width="648" height="52" rx="12" fill="#111b2e" stroke="#283750"/>
+  <rect x="578" y="604" width="40" height="40" rx="11" fill="#0c0c0e" stroke="#8b93a1" stroke-opacity="0.5"/>
+  <g transform="translate(598,624)" stroke="#e2e8f0" stroke-width="2.6" stroke-linecap="round">
+    <path d="M-9,-9 L9,9 M9,-9 L-9,9"/>
+  </g>
+  <text x="632" y="622" font-size="15.5" font-weight="700" fill="#f1f5f9">Grok</text>
+  <text x="632" y="638" font-size="11" fill="#8da0bb">xAI</text>
+  <rect x="1094" y="612" width="108" height="24" rx="12" fill="#15161a" stroke="#8b93a1" stroke-opacity="0.4"/>
+  <text x="1148" y="628" text-anchor="middle" font-size="12" fill="#cbd5e1">Grok Build</text>
 
   <!-- Claude Code's call -->
   <path d="M362,502 L362,536" stroke="#34d399" stroke-width="2.5" fill="none"/>

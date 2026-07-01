@@ -88,12 +88,19 @@ fn run_one(agent: Agent, prompt: &str, repo: &Path, timeout: Duration, skip_nati
     let started = Instant::now();
     let plan = agent.attempt_plan(skip_native);
     if plan.is_empty() {
+        // A native-only agent (antigravity, grok) has no OpenRouter fallback, so
+        // the failure is purely "not logged in" - don't mention a key it can't use.
+        let why = if agent.supports_openrouter() {
+            "no usable login and no OpenRouter key"
+        } else {
+            "no usable login (native-only; cannot use OpenRouter)"
+        };
         return Report {
             agent,
             output: String::new(),
             stderr: String::new(),
             elapsed: started.elapsed(),
-            outcome: Outcome::Failed("no usable login and no OpenRouter key".into()),
+            outcome: Outcome::Failed(why.into()),
             used_openrouter: false,
             fell_back: false,
         };
@@ -144,7 +151,7 @@ fn run_attempt(
 ) -> Report {
     let started = Instant::now();
     let mut cmd = agent.command(repo, openrouter);
-    // Most agents read the prompt on stdin; the rest (vibe) take it as a
+    // Most agents read the prompt on stdin; the rest (vibe, grok) take it as a
     // trailing argument and get no stdin.
     let on_stdin = agent.reads_stdin();
     if !on_stdin {
