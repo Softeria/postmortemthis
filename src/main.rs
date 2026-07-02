@@ -127,13 +127,10 @@ fn run(args: RunArgs) -> Result<()> {
     if !args.no_update
         && let Some(gg) = gg::locate()
     {
-        // Scoped: update only the agents this run uses, in parallel - not the
-        // user's whole gg toolchain, and never postmortemthis itself.
-        let tools: Vec<&str> = selected
-            .iter()
-            .filter(|a| a.via() == Some(Via::Gg))
-            .map(|a| a.gg_tool())
-            .collect();
+        // Scoped: update only the agents this run uses (plus any borrowed
+        // OpenRouter runner, e.g. codex for grok), in parallel - not the user's
+        // whole gg toolchain, and never postmortemthis itself.
+        let tools = gg_tools_for(&selected);
         if !tools.is_empty() {
             eprintln!("postmortemthis: updating {} ...", tools.join(", "));
             let children: Vec<_> = tools
@@ -292,7 +289,7 @@ fn run_notes(reports: &[Report], selected: &[Agent], settings: &settings::Settin
     // Agents that exist but were not run for lack of usable credentials. An
     // OpenRouter-capable agent is runnable whenever a key is present (whether or
     // not it was requested), so flag it only when there is no key. A native-only
-    // agent (antigravity, grok) can't use the key at all, so flag it whenever it
+    // agent (antigravity) can't use the key at all, so flag it whenever it
     // lacks its own login - even with a key set - and point it at that login.
     let has_key = openrouter::key().is_some();
     for agent in agents::ALL {
@@ -399,11 +396,14 @@ fn plan_run(
     // is actually reachable (a key is present and the agent supports it).
     // Otherwise leave the native login in play - forcing a route that can't run
     // would turn a working agent into a guaranteed empty-plan failure every run.
-    let or_reachable = openrouter::key().is_some();
+    let has_key = openrouter::key().is_some();
     for &agent in &selected {
+        // openrouter_reachable (not supports_openrouter) so a borrowed-harness
+        // agent (grok -> codex) isn't forced onto OpenRouter when its runner is
+        // missing - that would drop the working native leg for an empty plan.
         if settings.mode(agent) == settings::Mode::Openrouter
-            && or_reachable
-            && agent.supports_openrouter()
+            && has_key
+            && agent.openrouter_reachable()
             && !skip.contains(&agent)
         {
             skip.push(agent);
@@ -463,20 +463,20 @@ fn select_agents(requested: &[String], settings: &settings::Settings) -> Result<
             // Auto-pick an available agent (native on PATH or gg-bootstrappable)
             // only if it can actually run: explicitly requested, its own login, or
             // an OpenRouter key it can actually use. The key check is gated on
-            // supports_openrouter() so a native-only agent (antigravity, grok) is
+            // supports_openrouter() so a native-only agent (antigravity) is
             // not auto-selected on key-presence alone only to fail with an empty
             // attempt plan. Native and gg share this gate - otherwise an
-            // installed-but-logged-out native-only agent (grok) would be selected
+            // installed-but-logged-out native-only agent would be selected
             // unconditionally and fail on every default run. --agents overrides.
             Some(_)
                 if explicit
                     || agent.authed()
-                    || (openrouter::key().is_some() && agent.supports_openrouter()) =>
+                    || (openrouter::key().is_some() && agent.openrouter_reachable()) =>
             {
                 selected.push(agent)
             }
             Some(_) => {
-                // Native-only agents (antigravity, grok) have no OpenRouter
+                // Native-only agents (antigravity) have no OpenRouter
                 // route, so --key can't help them - don't suggest it.
                 let how = if agent.supports_openrouter() {
                     "log in once, or pass --key"
@@ -501,14 +501,35 @@ fn select_agents(requested: &[String], settings: &settings::Settings) -> Result<
     Ok(selected)
 }
 
+/// The gg tool names needed to run `selected`: each agent's own tool plus, for
+/// an agent that borrows another's OpenRouter harness (grok -> codex), that
+/// runner's tool - so the borrowed CLI is prewarmed too, not downloaded inside
+/// the per-agent timeout on fallback. Deduped, gg-bootstrappable agents only.
+fn gg_tools_for(selected: &[Agent]) -> Vec<&'static str> {
+    // Only prewarm a borrowed OpenRouter runner (codex for grok) when a key makes
+    // that leg reachable - otherwise it's a wasted download for a keyless run.
+    let borrow_runners = openrouter::key().is_some();
+    let mut tools: Vec<&str> = selected
+        .iter()
+        .filter(|a| a.via() == Some(Via::Gg))
+        .flat_map(|a| {
+            let mut v = vec![a.gg_tool()];
+            let runner = a.openrouter_runner();
+            if borrow_runners && runner != *a {
+                v.push(runner.gg_tool());
+            }
+            v
+        })
+        .collect();
+    tools.sort_unstable();
+    tools.dedup();
+    tools
+}
+
 /// One chained gg invocation prepares every needed tool in parallel before the
 /// fan-out, so the per-agent timeout is spent running, not bootstrapping.
 fn prewarm(selected: &[Agent], dir: &std::path::Path) {
-    let tools: Vec<&str> = selected
-        .iter()
-        .filter(|a| a.via() == Some(Via::Gg))
-        .map(|a| a.gg_tool())
-        .collect();
+    let tools = gg_tools_for(selected);
     let Some(gg) = gg::locate() else { return };
     if tools.is_empty() {
         return;
