@@ -195,7 +195,8 @@ fn run(args: RunArgs) -> Result<()> {
 /// printed to stdout and, with --out, a file.
 fn report_section(r: &Report) -> String {
     let provenance = if r.used_openrouter {
-        format!("via OpenRouter: {}", r.agent.openrouter_model())
+        let model = r.agent.openrouter_model().expect("ran on OpenRouter, so has a model");
+        format!("via OpenRouter: {model}")
     } else {
         "native login".to_string()
     };
@@ -275,7 +276,7 @@ fn run_notes(reports: &[Report], selected: &[Agent], settings: &settings::Settin
         if r.fell_back {
             notes.push(format!(
                 "- {name}: native login failed, so it ran on OpenRouter ({}). To restore the native login, {}. To skip the wasted retry on later runs, add `--skip-native {name}`.",
-                r.agent.openrouter_model(),
+                r.agent.openrouter_model().expect("fell back to OpenRouter, so has a model"),
                 r.agent.native_fix_hint(),
             ));
         }
@@ -555,7 +556,7 @@ fn start_vibe_home(selected: &[Agent]) -> Option<vibe::Home> {
     if !(selected.contains(&Agent::Vibe) && openrouter::key().is_some()) {
         return None;
     }
-    match vibe::Home::create(Agent::Vibe.openrouter_model()) {
+    match vibe::Home::create(Agent::Vibe.openrouter_model().expect("vibe has an OpenRouter model")) {
         Ok(home) => Some(home),
         Err(e) => {
             eprintln!("postmortemthis: could not prepare vibe home ({e}); the vibe leg will fail");

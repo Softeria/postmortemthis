@@ -85,19 +85,22 @@ impl Agent {
         }
     }
 
-    /// The OpenRouter model slug this agent runs on when it has no usable
-    /// native login (or is forced there). Single source for the env/args and
-    /// for the provenance shown to the caller.
-    pub fn openrouter_model(&self) -> &'static str {
+    /// The OpenRouter model slug this agent runs on when it has no usable native
+    /// login (or is forced there), or None for a native-only agent that has no
+    /// OpenRouter route at all. Single source for the env/args and the provenance
+    /// shown to the caller; the None forces callers to rule out native-only
+    /// agents rather than emitting a fake slug.
+    pub fn openrouter_model(&self) -> Option<&'static str> {
         match self {
-            Agent::Claude => "anthropic/claude-sonnet-4.6",
-            Agent::Codex => "openai/gpt-5",
-            Agent::Qwen => "qwen/qwen3-coder",
-            Agent::Vibe => "mistralai/mistral-medium-3.1",
-            // Antigravity is native-only, so this is never used for it.
-            Agent::Antigravity => "native-only (no OpenRouter)",
+            Agent::Claude => Some("anthropic/claude-sonnet-4.6"),
+            Agent::Codex => Some("openai/gpt-5"),
+            Agent::Qwen => Some("qwen/qwen3-coder"),
+            Agent::Vibe => Some("mistralai/mistral-medium-3.1"),
+            // Antigravity is native-only: no OpenRouter model. None (not a fake
+            // slug) so the type forces callers to have already ruled this out.
+            Agent::Antigravity => None,
             // Grok's OpenRouter leg drives its own model through codex's harness.
-            Agent::Grok => "x-ai/grok-build-0.1",
+            Agent::Grok => Some("x-ai/grok-build-0.1"),
         }
     }
 
@@ -213,7 +216,7 @@ impl Agent {
         let mut cmd = if runner == Agent::Codex {
             // Codex's exec harness; the model is passed only on the OpenRouter
             // leg (grok supplies its own model, codex supplies gpt-5).
-            codex_exec_command(repo, openrouter.then(|| self.openrouter_model()))
+            codex_exec_command(repo, if openrouter { self.openrouter_model() } else { None })
         } else {
             let mut cmd = runner.base_command();
             cmd.args(self.args());
@@ -245,14 +248,15 @@ impl Agent {
         plan
     }
 
-    /// A native-only agent is a closed-source CLI bound to its vendor's own
-    /// backend with no way to reach OpenRouter at all - only Antigravity
-    /// (Google). Grok's own CLI also can't be repointed, but grok's *model*
-    /// (x-ai/grok-build-0.1) is on OpenRouter, so grok's OpenRouter leg borrows
-    /// codex's harness (see `command`) - hence grok is NOT native-only. The
-    /// single source of truth for "has no OpenRouter route".
+    /// A native-only agent has no OpenRouter route at all - only Antigravity
+    /// (Google). Derived from `openrouter_model()` so "has an OpenRouter route"
+    /// has ONE source: an agent with no model slug is native-only, and every
+    /// capability and guard below follows from it - they can't disagree. (Grok
+    /// is NOT native-only: its own CLI can't reach OpenRouter, but its model
+    /// x-ai/grok-build-0.1 is there and its OpenRouter leg borrows codex's
+    /// harness - see `openrouter_runner`/`command`.)
     pub fn is_native_only(&self) -> bool {
-        matches!(self, Agent::Antigravity)
+        self.openrouter_model().is_none()
     }
 
     /// Can this agent reach OpenRouter in principle? Most can: Claude via the
@@ -351,7 +355,10 @@ impl Agent {
             Agent::Claude => vec![
                 ("ANTHROPIC_BASE_URL", "https://openrouter.ai/api".into()),
                 ("ANTHROPIC_AUTH_TOKEN", key.to_string()),
-                ("ANTHROPIC_MODEL", self.openrouter_model().into()),
+                (
+                    "ANTHROPIC_MODEL",
+                    self.openrouter_model().expect("claude has an OpenRouter model").into(),
+                ),
                 ("MAX_THINKING_TOKENS", "0".into()),
             ],
             // Grok's OpenRouter leg runs through codex, which reads the same key.
@@ -364,7 +371,10 @@ impl Agent {
             Agent::Qwen => vec![
                 ("OPENAI_API_KEY", key.to_string()),
                 ("OPENAI_BASE_URL", "https://openrouter.ai/api/v1".into()),
-                ("OPENAI_MODEL", self.openrouter_model().into()),
+                (
+                    "OPENAI_MODEL",
+                    self.openrouter_model().expect("qwen has an OpenRouter model").into(),
+                ),
             ],
             // Vibe reads its provider/model from the scratch VIBE_HOME and the
             // key from OPENROUTER_API_KEY (named in that config). VIBE_HOME is
