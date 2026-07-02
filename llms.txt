@@ -1,7 +1,7 @@
 # postmortemthis
 
 > Every AI coding-agent CLI you already have (Claude Code, Codex, Antigravity, Qwen,
-> Vibe) reviews your diff in parallel and read-only, then synthesizes one
+> Vibe, Grok) reviews your diff in parallel and read-only, then synthesizes one
 > ship / no-ship verdict. One tiny script — no server, no MCP, no signup.
 
 ## Install (paste into any coding agent)
