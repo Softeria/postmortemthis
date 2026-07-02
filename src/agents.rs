@@ -106,7 +106,7 @@ impl Agent {
             Agent::Claude => "run `claude` once to refresh its login",
             Agent::Codex => "run `codex login` to refresh its login",
             Agent::Antigravity => "run `antigravity` once to refresh its Google login",
-            Agent::Grok => "set XAI_API_KEY (headless auth; get one at console.x.ai)",
+            Agent::Grok => "run `grok login`, or set XAI_API_KEY (console.x.ai)",
             Agent::Qwen | Agent::Vibe => "no native login; runs on OpenRouter",
         }
     }
@@ -443,11 +443,12 @@ impl Agent {
             // gemini-cli, runs that login headless - so the saved account is
             // usable auth on its own, no API key required.
             Agent::Antigravity => exists(".gemini/google_accounts.json"),
-            // Grok Build authenticates headless with an xAI API key
-            // (console.x.ai). Its browser OAuth caches credentials we don't
-            // probe, and the ~/.grok dir is created on install before any login
-            // (verified), so dir-existence is NOT an auth signal - only the key.
-            Agent::Grok => env_set("XAI_API_KEY"),
+            // Grok Build authenticates headless two ways: `grok login` (device
+            // OAuth) writes ~/.grok/auth.json and runs against the subscription
+            // proxy, or XAI_API_KEY hits the plain API. auth.json is written only
+            // on login (NOT on install, unlike the ~/.grok dir), so it is a safe
+            // signal. Either counts as usable headless auth.
+            Agent::Grok => exists(".grok/auth.json") || env_set("XAI_API_KEY"),
             // Qwen and Vibe have no widely-held native login wired up; they
             // run through OpenRouter when a key is present (see attempt_plan).
             Agent::Qwen | Agent::Vibe => false,
@@ -460,15 +461,13 @@ impl Agent {
                 Agent::Claude => "logged in (subscription or API)".into(),
                 Agent::Codex => "logged in".into(),
                 Agent::Antigravity => "logged in (Google account)".into(),
-                Agent::Grok => "XAI_API_KEY set".into(),
+                Agent::Grok => "signed in (grok login or XAI_API_KEY)".into(),
                 Agent::Qwen | Agent::Vibe => "logged in".into(),
             }
         } else if matches!(self, Agent::Qwen | Agent::Vibe) {
             "runs via OpenRouter (needs a key; no native login wired up)".into()
         } else if matches!(self, Agent::Grok) {
-            // Grok headless auth is XAI_API_KEY; `grok login` (browser OAuth) is
-            // not probed and does not satisfy authed(), so don't suggest it here.
-            "no XAI_API_KEY set - headless auth needs a key from console.x.ai".into()
+            "not signed in - run `grok login`, or set XAI_API_KEY (console.x.ai)".into()
         } else {
             format!(
                 "no credentials found - run `{}` once to log in",
