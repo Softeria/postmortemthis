@@ -15,6 +15,13 @@ path = "src/main.rs"
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
 wait-timeout = "0.2"
+# `postmortemthis setup`: the interactive wizard's arrow-key menus and yes/no
+# prompts. default-features off drops the editor/password extras (tempfile,
+# zeroize) - we only use Select and Confirm.
+dialoguer = { version = "0.12", default-features = false }
+# Restore the terminal cursor on Ctrl-C during a setup prompt (dialoguer hides
+# it and console re-raises SIGINT, so the process would die with it hidden).
+ctrlc = "3"
 # `postmortemthis login` runs the OpenRouter token exchange on a small async
 # runtime; the normal launcher path never starts one. `net` is needed for the
 # IO driver reqwest's HTTP call drives under `block_on`/`enable_all` - reqwest

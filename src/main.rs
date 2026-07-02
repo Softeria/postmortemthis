@@ -41,9 +41,13 @@ enum Cmd {
     Login,
     /// Show which agent CLIs are installed and authenticated.
     Doctor,
-    /// Interactively configure each agent (keep, log in, force OpenRouter, or
-    /// disable) and optionally fire a test prompt. Saved to agents.json.
-    Setup,
+    /// Interactively configure agents (keep, log in, force OpenRouter, or
+    /// disable) and optionally fire a test prompt. Pass an AGENT to configure
+    /// just that one; omit it for all. Saved to agents.json.
+    Setup {
+        /// Agent to configure (default: all).
+        agent: Option<String>,
+    },
 }
 
 #[derive(clap::Args, Default)]
@@ -87,7 +91,15 @@ fn main() -> Result<()> {
     match cli.command {
         Some(Cmd::Login) => login::run(),
         Some(Cmd::Doctor) => doctor(),
-        Some(Cmd::Setup) => setup::run(),
+        Some(Cmd::Setup { agent }) => {
+            // Resolve an optional agent name via the same parser (and error
+            // message) as --agents; None means configure all.
+            let target = match &agent {
+                Some(name) => Some(parse_agents(std::slice::from_ref(name))?[0]),
+                None => None,
+            };
+            setup::run(target)
+        }
         None => run(cli.run),
     }
 }
