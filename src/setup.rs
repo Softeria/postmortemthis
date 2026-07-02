@@ -178,8 +178,8 @@ fn poke(agent: Agent, has_key: bool) -> String {
     if agent.authed() {
         return format!("{} - native login will be used", agent.auth_hint());
     }
-    if has_key && agent.supports_openrouter() {
-        return format!("no login - will run on OpenRouter ({})", agent.openrouter_model());
+    if has_key && let Some(model) = agent.openrouter_model() {
+        return format!("no login - will run on OpenRouter ({model})");
     }
     if agent.has_native_login() {
         "not logged in - won't run until you log in".into()
@@ -196,7 +196,8 @@ fn effective(agent: Agent, settings: &Settings, has_key: bool) -> String {
         // Forced OpenRouter only takes effect with a usable route; plan_run falls
         // back to native otherwise, so the summary must say so, not overstate it.
         Mode::Openrouter if has_key && agent.supports_openrouter() => {
-            format!("forced OpenRouter ({})", agent.openrouter_model())
+            let model = agent.openrouter_model().expect("supports_openrouter, so has a model");
+            format!("forced OpenRouter ({model})")
         }
         Mode::Openrouter => format!("forced OpenRouter (inactive, no key) - {}", poke(agent, has_key)),
         Mode::Auto => poke(agent, has_key),
