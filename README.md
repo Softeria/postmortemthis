@@ -27,6 +27,8 @@ That prompt is the whole install — your agent writes the skill from it. **Twea
 
 Your own logins where you have them. For the rest, `sh postmortemthis.cmd login` (OpenRouter OAuth) or set `OPENROUTER_API_KEY`. Usage bills to your account; this resells nothing.
 
+Even Grok works on OpenRouter: its own CLI can't reach OpenRouter, but its model (`x-ai/grok-build-0.1`) is there, so postmortemthis runs it through an OpenAI-compatible harness — no xAI subscription needed, just the key.
+
 Run `sh postmortemthis.cmd setup` for a guided pass over every agent — it pokes each one, then lets you log in (many have a free or already-paid tier), force OpenRouter, or disable it, and can fire a test prompt at the end. Choices are saved and honored on every run.
 
 ## CLI
