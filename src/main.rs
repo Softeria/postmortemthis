@@ -205,9 +205,66 @@ fn report_section(r: &Report) -> String {
     let body = match &r.outcome {
         Outcome::Ok => r.output.trim().to_string(),
         Outcome::TimedOut => "_timed out_".to_string(),
-        Outcome::Failed(why) => format!("_failed: {why}_\n\n```\n{}\n```", r.stderr.trim()),
+        Outcome::Failed(why) => {
+            let detail = condense_failure(&r.stderr);
+            if detail.is_empty() {
+                format!("_failed: {why}_")
+            } else {
+                format!("_failed: {why}_\n\n```\n{detail}\n```")
+            }
+        }
     };
     format!("# {} ({provenance})\n\n{body}\n", r.agent.name())
+}
+
+/// Trim a failed agent's stderr down to something readable. Agents often log the
+/// same error several times (grok prints a 403 five times over), colour it with
+/// ANSI escapes, and pad it with blank lines; strip the colour, drop the blanks,
+/// collapse exact-duplicate lines, and cap the total so one agent's wall of text
+/// can't bury the others. The synthesizing caller still gets the message - once.
+fn condense_failure(stderr: &str) -> String {
+    const MAX_LINES: usize = 15;
+    let cleaned = strip_ansi(stderr);
+    let mut seen = std::collections::HashSet::new();
+    let mut lines: Vec<&str> = Vec::new();
+    for line in cleaned.lines() {
+        let line = line.trim_end();
+        if line.trim().is_empty() {
+            continue;
+        }
+        if seen.insert(line) {
+            lines.push(line);
+        }
+    }
+    if lines.len() > MAX_LINES {
+        let omitted = lines.len() - MAX_LINES;
+        lines.truncate(MAX_LINES);
+        return format!("{}\n... ({omitted} more line(s) omitted)", lines.join("\n"));
+    }
+    lines.join("\n")
+}
+
+/// Drop ANSI CSI escape sequences (colours, styles) an agent wrote to a pipe.
+/// A CSI run is ESC `[` ... up to a letter terminator; other escapes just lose
+/// the lone ESC. Kept dependency-free (no regex) for such a small need.
+fn strip_ansi(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c != '\x1b' {
+            out.push(c);
+            continue;
+        }
+        if chars.peek() == Some(&'[') {
+            chars.next();
+            for nc in chars.by_ref() {
+                if nc.is_ascii_alphabetic() {
+                    break;
+                }
+            }
+        }
+    }
+    out
 }
 
 /// Operational notes for the calling agent: what it can fix or change on a
