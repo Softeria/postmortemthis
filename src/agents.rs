@@ -63,10 +63,12 @@ impl Agent {
         }
     }
 
-    /// Does this agent take the prompt on stdin? Most do; vibe and grok want it
-    /// as a command-line argument (the value of `-p`, appended by the runner).
-    pub fn reads_stdin(&self) -> bool {
-        !matches!(self, Agent::Vibe | Agent::Grok)
+    /// Does this agent take the prompt on stdin? It depends on the CLI that runs
+    /// the leg (grok borrows codex on OpenRouter). Vibe and grok's own CLI take
+    /// the prompt as `-p`'s value; every other harness reads stdin.
+    pub fn reads_stdin(&self, openrouter: bool) -> bool {
+        let runner = if openrouter { self.openrouter_runner() } else { *self };
+        !matches!(runner, Agent::Vibe | Agent::Grok)
     }
 
     /// The tool name in gg's registry. Antigravity is pulled straight from its
@@ -92,9 +94,10 @@ impl Agent {
             Agent::Codex => "openai/gpt-5",
             Agent::Qwen => "qwen/qwen3-coder",
             Agent::Vibe => "mistralai/mistral-medium-3.1",
-            // Antigravity and Grok are native-only (no OpenRouter route), so
-            // this is never used for provenance; kept honest in case it leaks.
-            Agent::Antigravity | Agent::Grok => "native-only (no OpenRouter)",
+            // Antigravity is native-only, so this is never used for it.
+            Agent::Antigravity => "native-only (no OpenRouter)",
+            // Grok's OpenRouter leg drives its own model through codex's harness.
+            Agent::Grok => "x-ai/grok-build-0.1",
         }
     }
 
@@ -123,10 +126,11 @@ impl Agent {
         }
     }
 
-    /// Headless, read-only flags. The prompt itself is delivered on stdin:
-    /// it is large and multiline, and Windows .cmd shims reject
-    /// newline-containing arguments outright.
-    fn args(&self, openrouter: bool) -> Vec<&'static str> {
+    /// Headless, read-only flags for an agent run through its own CLI (i.e. not
+    /// codex, whose command is built in `codex_exec_command`). The prompt is
+    /// delivered on stdin where possible - it is large and multiline, and
+    /// Windows .cmd shims reject newline-containing arguments outright.
+    fn args(&self) -> Vec<&'static str> {
         match self {
             // -p: headless print mode. `dontAsk` keeps it read-only WITHOUT
             // diverting the review into a plan. Plan mode delivers the model's
@@ -146,33 +150,11 @@ impl Agent {
                 "--allowedTools",
                 "Read,Grep,Glob,Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git status:*),Bash(git rev-parse:*)",
             ],
-            // `-`: read the prompt from stdin. For OpenRouter, the `-c`
-            // overrides defining the provider must sit right after `exec`
-            // (codex's built-in openai provider can't be repointed by env
-            // alone for the Responses wire API).
-            Agent::Codex => {
-                // --ignore-user-config: run a clean one-shot. The user's
-                // config.toml (MCP servers, custom tools, extra headers) is
-                // irrelevant to a read-only review and can inject malformed
-                // tool schemas that upstream providers reject. Auth still
-                // resolves from CODEX_HOME.
-                let mut a = vec!["exec", "--ignore-user-config"];
-                if openrouter {
-                    a.extend_from_slice(&CODEX_OPENROUTER_ARGS);
-                    a.push("-m");
-                    a.push(self.openrouter_model());
-                }
-                a.extend_from_slice(&[
-                    "--sandbox",
-                    "read-only",
-                    // Run in any directory, not just a git repo; the sandbox
-                    // already enforces read-only, so the git-trust gate is
-                    // redundant here and just blocks non-repo cwds.
-                    "--skip-git-repo-check",
-                    "-",
-                ]);
-                a
-            }
+            // Codex (and grok's OpenRouter leg, which borrows it) build their
+            // command in `codex_exec_command`; `command()` never routes codex
+            // through here. Panic loudly rather than silently launch codex's
+            // interactive TUI with no args if that ever changes.
+            Agent::Codex => unreachable!("codex builds its command in codex_exec_command"),
             // -p -: single-prompt headless mode reading the prompt from stdin
             // (the `-` operand), like the other stdin agents - so the large,
             // multiline review prompt is never passed as a CLI argument (which
@@ -225,9 +207,19 @@ impl Agent {
     /// key; otherwise it runs on the user's own login. The caller pipes the
     /// prompt to stdin.
     pub fn command(&self, repo: &Path, openrouter: bool) -> Command {
-        let mut cmd = self.base_command();
-        cmd.args(self.args(openrouter));
-        cmd.current_dir(repo);
+        // The CLI that runs this leg: normally self, but on the OpenRouter leg an
+        // agent may borrow another's harness (grok -> codex).
+        let runner = if openrouter { self.openrouter_runner() } else { *self };
+        let mut cmd = if runner == Agent::Codex {
+            // Codex's exec harness; the model is passed only on the OpenRouter
+            // leg (grok supplies its own model, codex supplies gpt-5).
+            codex_exec_command(repo, openrouter.then(|| self.openrouter_model()))
+        } else {
+            let mut cmd = runner.base_command();
+            cmd.args(self.args());
+            cmd.current_dir(repo);
+            cmd
+        };
         if openrouter && let Some(key) = openrouter::key() {
             for (name, value) in self.openrouter_env(key) {
                 cmd.env(name, value);
@@ -254,11 +246,13 @@ impl Agent {
     }
 
     /// A native-only agent is a closed-source CLI bound to its vendor's own
-    /// backend with no endpoint to repoint at OpenRouter (Antigravity -> Google,
-    /// Grok -> xAI). The single source of truth for "has no OpenRouter route";
-    /// every OpenRouter capability below derives from it.
+    /// backend with no way to reach OpenRouter at all - only Antigravity
+    /// (Google). Grok's own CLI also can't be repointed, but grok's *model*
+    /// (x-ai/grok-build-0.1) is on OpenRouter, so grok's OpenRouter leg borrows
+    /// codex's harness (see `command`) - hence grok is NOT native-only. The
+    /// single source of truth for "has no OpenRouter route".
     pub fn is_native_only(&self) -> bool {
-        matches!(self, Agent::Antigravity | Agent::Grok)
+        matches!(self, Agent::Antigravity)
     }
 
     /// Can this agent reach OpenRouter in principle? Most can: Claude via the
@@ -288,14 +282,39 @@ impl Agent {
         }
     }
 
-    /// Can this agent reach OpenRouter *right now*? As `supports_openrouter`,
-    /// except Vibe additionally needs its scratch VIBE_HOME to be written
+    /// The agent whose CLI actually executes this agent's OpenRouter leg.
+    /// Normally itself; grok is the exception - its own CLI can't reach
+    /// OpenRouter, so grok's OpenRouter leg runs through codex's harness pointed
+    /// at grok's model (x-ai/grok-build-0.1). The single place that fact lives.
+    pub fn openrouter_runner(&self) -> Agent {
+        match self {
+            Agent::Grok => Agent::Codex,
+            other => *other,
+        }
+    }
+
+    /// Could this agent use OpenRouter in this environment? supports_openrouter()
+    /// plus, for an agent that borrows another's harness (grok -> codex), that
+    /// runner being installed/bootstrappable. Does NOT check per-run scratch
+    /// state (Vibe's VIBE_HOME), which is only ready after selection - so this is
+    /// the check for selection and planning. See openrouter_capable for run time.
+    pub fn openrouter_reachable(&self) -> bool {
+        if !self.supports_openrouter() {
+            return false;
+        }
+        let runner = self.openrouter_runner();
+        runner == *self || runner.via().is_some()
+    }
+
+    /// Can this agent reach OpenRouter *right now* (at attempt time)? As
+    /// openrouter_reachable, but Vibe also needs its scratch VIBE_HOME written
     /// (main.rs prepares it before the fan-out).
     fn openrouter_capable(&self) -> bool {
-        match self {
-            Agent::Vibe => vibe::home().is_some(),
-            _ => self.supports_openrouter(),
-        }
+        self.openrouter_reachable()
+            && match self {
+                Agent::Vibe => vibe::home().is_some(),
+                _ => true,
+            }
     }
 
     /// Args that run this agent's interactive login, or None when it has none.
@@ -335,10 +354,11 @@ impl Agent {
                 ("ANTHROPIC_MODEL", self.openrouter_model().into()),
                 ("MAX_THINKING_TOKENS", "0".into()),
             ],
-            Agent::Codex => vec![("OPENROUTER_API_KEY", key.to_string())],
-            // Antigravity and Grok have no OpenRouter route (native-login only),
-            // so they are never run with `openrouter` set - no env to inject.
-            Agent::Antigravity | Agent::Grok => vec![],
+            // Grok's OpenRouter leg runs through codex, which reads the same key.
+            Agent::Codex | Agent::Grok => vec![("OPENROUTER_API_KEY", key.to_string())],
+            // Antigravity has no OpenRouter route, so it is never run with
+            // `openrouter` set - no env to inject.
+            Agent::Antigravity => vec![],
             // Qwen Code speaks the OpenAI-compatible API directly, so it needs
             // no bridge: point its OpenAI client at OpenRouter on the key.
             Agent::Qwen => vec![
@@ -475,6 +495,27 @@ impl Agent {
             )
         }
     }
+}
+
+/// Codex's read-only `exec` harness. `or_model = Some(model)` points it at
+/// OpenRouter on that model (the `-c` provider overrides go right after `exec`,
+/// which codex's built-in openai provider needs for the Responses wire API);
+/// None runs codex on its own login. Grok's OpenRouter leg reuses this - the
+/// grok CLI can't reach OpenRouter, but codex can drive grok's model there.
+/// --ignore-user-config runs a clean one-shot: the user's config.toml (MCP
+/// servers, custom tools) is irrelevant to a read-only review and can inject
+/// malformed tool schemas that upstream providers reject. --skip-git-repo-check
+/// lets it run outside a git repo; the sandbox already enforces read-only.
+fn codex_exec_command(repo: &Path, or_model: Option<&str>) -> Command {
+    let mut cmd = Agent::Codex.base_command();
+    cmd.arg("exec").arg("--ignore-user-config");
+    if let Some(model) = or_model {
+        cmd.args(CODEX_OPENROUTER_ARGS);
+        cmd.arg("-m").arg(model);
+    }
+    cmd.args(["--sandbox", "read-only", "--skip-git-repo-check", "-"]);
+    cmd.current_dir(repo);
+    cmd
 }
 
 /// Claude Code on macOS stores OAuth credentials in the Keychain, not in
