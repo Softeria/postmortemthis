@@ -64,21 +64,25 @@ impl Agent {
     }
 
     /// Does this agent take the prompt on stdin? It depends on the CLI that runs
-    /// the leg (grok borrows codex on OpenRouter). Vibe and grok's own CLI take
-    /// the prompt as `-p`'s value; every other harness reads stdin.
+    /// the leg (grok borrows codex on OpenRouter). Vibe, antigravity and grok's
+    /// own CLI take the prompt as `-p`'s value; every other harness reads stdin.
     pub fn reads_stdin(&self, openrouter: bool) -> bool {
         let runner = if openrouter { self.openrouter_runner() } else { *self };
-        !matches!(runner, Agent::Vibe | Agent::Grok)
+        !matches!(runner, Agent::Vibe | Agent::Grok | Agent::Antigravity)
     }
 
-    /// The tool name in gg's registry. Antigravity is pulled straight from its
-    /// GitHub release repo (no short alias); grok is the `grok` tool added in
-    /// gg 187, which bootstraps the @xai-official/grok npm package.
+    /// The tool name in gg's registry. grok is the `grok` tool added in gg 187,
+    /// which bootstraps the @xai-official/grok npm package; antigravity landed
+    /// in gg 199.
+    ///
+    /// `antigravity-cli` and not `antigravity` on purpose: gg caches it under
+    /// the repo name whatever alias you run, and `gg update` looks it up by
+    /// cache name, so `update antigravity` silently finds nothing.
     pub fn gg_tool(&self) -> &'static str {
         match self {
             Agent::Claude => "claude",
             Agent::Codex => "codex",
-            Agent::Antigravity => "gh/google-antigravity/antigravity-cli",
+            Agent::Antigravity => "antigravity-cli",
             Agent::Qwen => "qwen",
             Agent::Vibe => "vibe",
             Agent::Grok => "grok",
@@ -121,7 +125,7 @@ impl Agent {
         match s.trim().to_lowercase().as_str() {
             "claude" | "claude-code" => Some(Agent::Claude),
             "codex" => Some(Agent::Codex),
-            "antigravity" | "antigravity-cli" => Some(Agent::Antigravity),
+            "antigravity" | "antigravity-cli" | "agy" => Some(Agent::Antigravity),
             "qwen" | "qwen-code" => Some(Agent::Qwen),
             "vibe" | "mistral-vibe" => Some(Agent::Vibe),
             "grok" | "grok-build" => Some(Agent::Grok),
@@ -158,10 +162,12 @@ impl Agent {
             // through here. Panic loudly rather than silently launch codex's
             // interactive TUI with no args if that ever changes.
             Agent::Codex => unreachable!("codex builds its command in codex_exec_command"),
-            // -p -: single-prompt headless mode reading the prompt from stdin
-            // (the `-` operand), like the other stdin agents - so the large,
-            // multiline review prompt is never passed as a CLI argument (which
-            // Windows .cmd shims reject and argv limits truncate).
+            // -p: single-prompt headless mode. Antigravity does not read stdin -
+            // `-p -` takes the literal `-` as the prompt and answers "Hello! How
+            // can I help you today?", losing the whole review. So `-p` goes last
+            // and the runner appends the prompt (see reads_stdin). Ok as an argv
+            // operand: gg ships antigravity as a native binary, not a .cmd shim,
+            // so multiline survives.
             // Read-only rests on the print-mode default: WITHOUT
             // --dangerously-skip-permissions, any write tool is diverted into
             // Antigravity's own scratch dir and never touches the workspace
@@ -171,7 +177,7 @@ impl Agent {
             // print-timeout fires. --print-timeout is parked far above any
             // realistic outer --timeout so postmortemthis's own timeout governs,
             // not Antigravity's 5m print-mode default.
-            Agent::Antigravity => vec!["--print-timeout", "24h", "-p", "-"],
+            Agent::Antigravity => vec!["--print-timeout", "24h", "-p"],
             // Qwen Code is a Gemini-CLI fork: same read-only approval model.
             // --auth-type openai pins it to the OpenAI-compatible endpoint
             // (the OPENAI_* env points that at OpenRouter); the prompt is read
