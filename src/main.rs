@@ -13,6 +13,7 @@ use clap::{Parser, Subcommand};
 use runner::{Outcome, Report};
 use std::io::Read;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::time::Duration;
 
 /// Version reported by `--version`: the git tag baked in at release build
@@ -156,7 +157,16 @@ fn run(args: RunArgs) -> Result<()> {
         selected.iter().map(|a| a.name()).collect::<Vec<_>>().join(", ")
     );
 
+    // Antigravity's leg is held read-only by a persona, not a sandbox (see
+    // agents::Agent::args), so "it did not write" is an assumption about a CLI
+    // that moves fast. Better to notice than to trust a comment.
+    let tree_before = tree_state(&cwd);
+
     let reports = execute(&selected, &skip_native, &prompt, &cwd, timeout)?;
+
+    let tree_touched = selected.contains(&Agent::Antigravity)
+        && tree_before.is_some()
+        && tree_state(&cwd) != tree_before;
 
     // When --out is set, write each agent's output to a file and print the
     // paths first, so they survive even if the stdout body is later truncated
@@ -175,7 +185,7 @@ fn run(args: RunArgs) -> Result<()> {
         print!("\n\n{}", report_section(r));
     }
 
-    let notes = run_notes(&reports, &selected, &settings);
+    let notes = run_notes(&reports, &selected, &settings, tree_touched);
     if !notes.is_empty() {
         print!(
             "\n\n---\n\n# postmortemthis run notes (operational; not part of the review)\n\n{}\n",
@@ -265,11 +275,27 @@ fn strip_ansi(s: &str) -> String {
     out
 }
 
+/// Under this many characters, an agent that exited cleanly probably answered
+/// with a placeholder, not a review. A terse-but-real reply costs one note; a
+/// lost leg costs the caller an opinion it thinks it had.
+const THIN_OUTPUT: usize = 300;
+
 /// Operational notes for the calling agent: what it can fix or change on a
 /// later run. Empty when there is nothing worth saying. Kept terse and
 /// imperative because the consumer is an LLM composing the next command.
-fn run_notes(reports: &[Report], selected: &[Agent], settings: &settings::Settings) -> Vec<String> {
+fn run_notes(
+    reports: &[Report],
+    selected: &[Agent],
+    settings: &settings::Settings,
+    tree_touched: bool,
+) -> Vec<String> {
     let mut notes = Vec::new();
+
+    if tree_touched {
+        notes.push(
+            "- the working tree changed while the agents ran. Every leg but antigravity is held read-only by its own CLI; antigravity's plan mode is a persona, not a sandbox, so it is the one to suspect. Run `git status` and `git diff` before trusting the review above.".to_string(),
+        );
+    }
 
     for r in reports {
         let name = r.agent.name();
@@ -283,6 +309,16 @@ fn run_notes(reports: &[Report], selected: &[Agent], settings: &settings::Settin
         if r.outcome == Outcome::TimedOut {
             notes.push(format!(
                 "- {name}: timed out. Raise --timeout or shorten the prompt."
+            ));
+        }
+        // Exit status is a poor test of "answered": an agent can exit 0 having
+        // printed "I have created a plan, please review it", or nothing at all
+        // (claude via OpenRouter, see openrouter_env). Both render as a normal
+        // section, so the caller reads a silent leg as one with nothing to add.
+        let len = r.output.trim().chars().count();
+        if r.outcome == Outcome::Ok && len < THIN_OUTPUT {
+            notes.push(format!(
+                "- {name}: exited cleanly but returned only {len} characters. That is usually a placeholder ('I have created a plan...'), not an answer - read its section before counting it as an opinion, and re-run that agent alone if you need it."
             ));
         }
     }
@@ -416,6 +452,18 @@ fn plan_run(
 /// Bring up per-run scratch state (Vibe's VIBE_HOME), prewarm the gg tools, and
 /// fan out. Shared by `run` and `setup`'s test so both take the same path; the
 /// Vibe home guard is held until run_all returns.
+/// `git status --porcelain` for the review cwd: a cheap tree fingerprint,
+/// compared before and after a run. None outside a git repo - postmortemthis
+/// runs in plain folders too. Never printed.
+fn tree_state(cwd: &Path) -> Option<String> {
+    let out = Command::new("git")
+        .args(["status", "--porcelain"])
+        .current_dir(cwd)
+        .output()
+        .ok()?;
+    out.status.success().then(|| String::from_utf8_lossy(&out.stdout).into_owned())
+}
+
 fn execute(
     selected: &[Agent],
     skip_native: &[Agent],

@@ -151,6 +151,8 @@ fn run_attempt(
 ) -> Report {
     let started = Instant::now();
     let mut cmd = agent.command(repo, openrouter);
+    let prompt = agent.decorate_prompt(prompt);
+    let prompt = prompt.as_ref();
     // Most read the prompt on stdin; vibe (always) and grok's native leg take it
     // as a trailing argument and get no stdin.
     let on_stdin = agent.reads_stdin(openrouter);
