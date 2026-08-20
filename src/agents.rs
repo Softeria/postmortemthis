@@ -86,9 +86,10 @@ impl Agent {
     /// which bootstraps the @xai-official/grok npm package; antigravity landed
     /// in gg 199.
     ///
-    /// `antigravity-cli` and not `antigravity` on purpose: gg caches it under
-    /// the repo name whatever alias you run, and `gg update` looks it up by
-    /// cache name, so `update antigravity` silently finds nothing.
+    /// `antigravity-cli` and not `antigravity` on purpose: gg caches it under the
+    /// repo name whatever alias you run, and until gg 200 `gg update` looked it up
+    /// by cache name, so `update antigravity` silently found nothing. Fixed since,
+    /// but the cache name is the one that works on every gg.
     pub fn gg_tool(&self) -> &'static str {
         match self {
             Agent::Claude => "claude",
@@ -295,6 +296,11 @@ impl Agent {
             cmd.current_dir(repo);
             cmd
         };
+        // gg prints its download dots on stdout, which is the same pipe the
+        // review comes back on - a cold cache used to prepend "0%....100%" to
+        // whatever the agent said. Needs gg 208, and only on this path: `login`
+        // wants its progress, nobody is parsing that one.
+        cmd.env("GG_HIDE_DOWNLOAD_PROGRESS", "1");
         if openrouter && let Some(key) = openrouter::key() {
             for (name, value) in self.openrouter_env(key) {
                 cmd.env(name, value);
