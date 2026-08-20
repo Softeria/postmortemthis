@@ -12,6 +12,11 @@ skill builds the prompt, runs the fan-out, and synthesizes the answers.
 It is **read-only by default**: it reports what the agents say, it does not edit, stage,
 commit, or push. Applying fixes is a separate, explicit step.
 
+Each agent is held read-only by its own CLI - a sandbox, a tool allowlist, a deny-on-approval
+mode - with one exception: Antigravity has no such switch, so it runs in its plan mode, which
+refuses to write but is a persona rather than a sandbox. The wrapper compares `git status`
+before and after the run and says so in the run notes if the tree moved.
+
 ## 1. Decide what to ask
 
 The prompt is whatever the user wants several agents to weigh in on. There is **no git

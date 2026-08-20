@@ -1,12 +1,23 @@
 use crate::gg;
 use crate::openrouter;
 use crate::vibe;
+use std::borrow::Cow;
+use std::ffi::OsString;
 use std::path::Path;
 use std::process::Command;
 use std::sync::OnceLock;
 
-/// A supported agent CLI. Each runs headless, read-only, in the repo's cwd,
-/// using its own native harness and whatever auth the user already has.
+/// Appended to Antigravity's prompt only; see `Agent::decorate_prompt`. The
+/// "do not modify" half earns its place: read-only on that leg is plan mode's
+/// persona, so skipping the plan file without it reads as "stop planning".
+const ANTIGRAVITY_CODA: &str = "\n\n---\nPut your findings in this reply: only stdout is \
+captured, so a plan or artifact file is not read back. Do not modify anything in the \
+workspace - this is a review, not a change.";
+
+/// A supported agent CLI. Each runs headless in the repo's cwd, using its own
+/// native harness and whatever auth the user already has. All read-only, but only
+/// five by their own CLI - Antigravity has no such switch and rides on its plan
+/// mode instead (see `args`), so main.rs watches the tree for it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Agent {
     Claude,
@@ -168,16 +179,46 @@ impl Agent {
             // and the runner appends the prompt (see reads_stdin). Ok as an argv
             // operand: gg ships antigravity as a native binary, not a .cmd shim,
             // so multiline survives.
-            // Read-only rests on the print-mode default: WITHOUT
-            // --dangerously-skip-permissions, any write tool is diverted into
-            // Antigravity's own scratch dir and never touches the workspace
-            // (verified empirically), while file reads and read-only git run
-            // against the real cwd. The explicit `--sandbox` flag is
-            // deliberately NOT used: it hangs headless `-p` runs until the
-            // print-timeout fires. --print-timeout is parked far above any
-            // realistic outer --timeout so postmortemthis's own timeout governs,
-            // not Antigravity's 5m print-mode default.
-            Agent::Antigravity => vec!["--print-timeout", "24h", "-p"],
+            //
+            // --add-dir (appended by `command`, which knows the repo):
+            // Antigravity ignores the process cwd. Print mode opens no workspace
+            // at all and works out of ~/.gemini/antigravity-cli/scratch instead -
+            // one run went looking for the repo with `find $HOME -maxdepth 3`.
+            //
+            // --mode plan is what holds this leg read-only. The print-mode
+            // default does not - it overwrites workspace files happily. Plan mode
+            // refused both a straight "overwrite this, do not plan" and the same
+            // thing through the terminal. It is a persona doing the refusing
+            // though, not a sandbox; a hard guarantee means a throwaway worktree.
+            // `--sandbox` is not it either - that only restricts the terminal,
+            // the write tools go right through.
+            //
+            // NOT --disable-slash-commands, however tempting: a prompt starting
+            // with `/` gets eaten as a slash command, but plan mode is built on
+            // that same expansion and the flag silently voids it ("warning:
+            // --mode plan has no effect while slash command expansion is
+            // disabled"), leaving skip-permissions on with nothing holding the
+            // tree. A leading `/` costs one leg, a voided plan mode costs the
+            // read-only property.
+            //
+            // --dangerously-skip-permissions: headless soft-denies every tool
+            // that needs approval (since 1.1.3), which under the stock
+            // `toolPermission: request-review` is every shell command. Without it
+            // the leg dies either way - bare `-p` exits 1 on "permission check
+            // failed", under --sandbox it exits 0 having printed nothing. It
+            // drops the confirmation, not the read-only; that is plan mode's job.
+            //
+            // --print-timeout is parked far above any realistic outer --timeout
+            // so postmortemthis's own timeout governs, not Antigravity's 5m
+            // print-mode default.
+            Agent::Antigravity => vec![
+                "--print-timeout",
+                "24h",
+                "--mode",
+                "plan",
+                "--dangerously-skip-permissions",
+                "-p",
+            ],
             // Qwen Code is a Gemini-CLI fork: same read-only approval model.
             // --auth-type openai pins it to the OpenAI-compatible endpoint
             // (the OPENAI_* env points that at OpenRouter); the prompt is read
@@ -197,6 +238,30 @@ impl Agent {
             // `-p` (alias --single) takes the prompt as its value, not on stdin,
             // so it goes last and the runner appends the prompt (see reads_stdin).
             Agent::Grok => vec!["--permission-mode", "dontAsk", "-p"],
+        }
+    }
+
+    /// The prompt as this agent's CLI should receive it. Antigravity's plan mode
+    /// (see `args`) is told by its own system prompt to put the findings in an
+    /// artifact file and not repeat them in the reply, so the review landed in
+    /// its brain dir and stdout got "I have created a plan, please review it".
+    /// The coda pulls it back into the reply. Everyone else gets it untouched.
+    pub fn decorate_prompt<'a>(&self, prompt: &'a str) -> Cow<'a, str> {
+        match self {
+            Agent::Antigravity => Cow::Owned(format!("{prompt}{ANTIGRAVITY_CODA}")),
+            _ => Cow::Borrowed(prompt),
+        }
+    }
+
+    /// Args that hand this agent the repo as its workspace, for a CLI that does
+    /// not take one from the process cwd. Only Antigravity needs it (see `args`);
+    /// the rest work off current_dir.
+    fn workspace_args(&self, repo: &Path) -> Vec<OsString> {
+        match self {
+            // OsString, not String: a repo path need not be UTF-8, and
+            // to_string_lossy() hands Antigravity a U+FFFD path that opens nothing
+            Agent::Antigravity => vec!["--add-dir".into(), repo.as_os_str().to_os_string()],
+            _ => vec![],
         }
     }
 
@@ -225,6 +290,7 @@ impl Agent {
             codex_exec_command(repo, if openrouter { self.openrouter_model() } else { None })
         } else {
             let mut cmd = runner.base_command();
+            cmd.args(self.workspace_args(repo));
             cmd.args(self.args());
             cmd.current_dir(repo);
             cmd
