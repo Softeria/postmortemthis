@@ -1,9 +1,10 @@
 use crate::gg;
+use crate::kimi;
 use crate::openrouter;
 use crate::vibe;
 use std::borrow::Cow;
 use std::ffi::OsString;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::OnceLock;
 
@@ -15,9 +16,10 @@ captured, so a plan or artifact file is not read back. Do not modify anything in
 workspace - this is a review, not a change.";
 
 /// A supported agent CLI. Each runs headless in the repo's cwd, using its own
-/// native harness and whatever auth the user already has. All read-only, but only
-/// five by their own CLI - Antigravity has no such switch and rides on its plan
-/// mode instead (see `args`), so main.rs watches the tree for it.
+/// native harness and whatever auth the user already has. All read-only, most by
+/// their own CLI's switch. Kimi has none, so its write tools are removed (see
+/// `kimi.rs`); Antigravity has none either and rides on its plan mode instead
+/// (see `args`), so main.rs watches the tree for it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Agent {
     Claude,
@@ -26,15 +28,17 @@ pub enum Agent {
     Qwen,
     Vibe,
     Grok,
+    Kimi,
 }
 
-pub const ALL: [Agent; 6] = [
+pub const ALL: [Agent; 7] = [
     Agent::Claude,
     Agent::Codex,
     Agent::Antigravity,
     Agent::Qwen,
     Agent::Vibe,
     Agent::Grok,
+    Agent::Kimi,
 ];
 
 /// Codex `-c` overrides that define OpenRouter as a custom model provider -
@@ -71,6 +75,7 @@ impl Agent {
             Agent::Qwen => "qwen",
             Agent::Vibe => "vibe",
             Agent::Grok => "grok",
+            Agent::Kimi => "kimi",
         }
     }
 
@@ -89,7 +94,7 @@ impl Agent {
     /// `antigravity-cli` and not `antigravity` on purpose: gg caches it under the
     /// repo name whatever alias you run, and until gg 200 `gg update` looked it up
     /// by cache name, so `update antigravity` silently found nothing. Fixed since,
-    /// but the cache name is the one that works on every gg.
+    /// but the cache name is the one that works on every gg. Same for kimi.
     pub fn gg_tool(&self) -> &'static str {
         match self {
             Agent::Claude => "claude",
@@ -98,6 +103,7 @@ impl Agent {
             Agent::Qwen => "qwen",
             Agent::Vibe => "vibe",
             Agent::Grok => "grok",
+            Agent::Kimi => "kimi-cli",
         }
     }
 
@@ -117,6 +123,7 @@ impl Agent {
             Agent::Antigravity => None,
             // Grok's OpenRouter leg drives its own model through codex's harness.
             Agent::Grok => Some("x-ai/grok-build-0.1"),
+            Agent::Kimi => Some("moonshotai/kimi-k3"),
         }
     }
 
@@ -129,6 +136,7 @@ impl Agent {
             Agent::Codex => "run `codex login` to refresh its login",
             Agent::Antigravity => "run `antigravity` once to refresh its Google login",
             Agent::Grok => "run `grok login`, or set XAI_API_KEY (console.x.ai)",
+            Agent::Kimi => "run `kimi login` to refresh its login",
             Agent::Qwen | Agent::Vibe => "no native login; runs on OpenRouter",
         }
     }
@@ -141,6 +149,7 @@ impl Agent {
             "qwen" | "qwen-code" => Some(Agent::Qwen),
             "vibe" | "mistral-vibe" => Some(Agent::Vibe),
             "grok" | "grok-build" => Some(Agent::Grok),
+            "kimi" | "kimi-cli" | "kimi-code" => Some(Agent::Kimi),
             _ => None,
         }
     }
@@ -239,6 +248,9 @@ impl Agent {
             // `-p` (alias --single) takes the prompt as its value, not on stdin,
             // so it goes last and the runner appends the prompt (see reads_stdin).
             Agent::Grok => vec!["--permission-mode", "dontAsk", "-p"],
+            // `--quiet` spelled out: print mode, plain text, final answer only.
+            // Read-only comes from the agent file `command` adds, not from here.
+            Agent::Kimi => vec!["--print", "--output-format", "text", "--final-message-only"],
         }
     }
 
@@ -246,10 +258,19 @@ impl Agent {
     /// (see `args`) is told by its own system prompt to put the findings in an
     /// artifact file and not repeat them in the reply, so the review landed in
     /// its brain dir and stdout got "I have created a plan, please review it".
-    /// The coda pulls it back into the reply. Everyone else gets it untouched.
-    pub fn decorate_prompt<'a>(&self, prompt: &'a str) -> Cow<'a, str> {
+    /// The coda pulls it back into the reply. Kimi has no shell (see `kimi.rs`),
+    /// so it gets the diff it cannot fetch. Everyone else gets it untouched.
+    pub fn decorate_prompt<'a>(&self, prompt: &'a str, repo: &Path) -> Cow<'a, str> {
         match self {
             Agent::Antigravity => Cow::Owned(format!("{prompt}{ANTIGRAVITY_CODA}")),
+            Agent::Kimi => Cow::Owned(match kimi::diff_for_prompt(repo) {
+                Some(diff) => format!(
+                    "{prompt}\n\n---\nYou have no shell in this run, so you cannot run git. \
+                     In case the request is about the current changes, here they are. Files \
+                     marked ?? are new and not in the diff; read them yourself.\n\n{diff}"
+                ),
+                None => format!("{prompt}\n\n---\nYou have no shell in this run."),
+            }),
             _ => Cow::Borrowed(prompt),
         }
     }
@@ -264,6 +285,39 @@ impl Agent {
             Agent::Antigravity => vec!["--add-dir".into(), repo.as_os_str().to_os_string()],
             _ => vec![],
         }
+    }
+
+    /// Where this agent should write its own debug log, so a dead leg can say
+    /// why. Only Antigravity needs one: on a 429 it retries with exponential
+    /// backoff and prints NOTHING on stdout or stderr while it does, and our
+    /// `--print-timeout 24h` (see `args`) means it never reaches the one point
+    /// where it would speak up. A quota error is then indistinguishable from a
+    /// hang - the leg just burns the whole --timeout and reports `_timed out_`.
+    /// The cause only ever exists in `--log-file`, so we ask for one and read
+    /// it back (see `take_diagnosis`).
+    ///
+    /// One path per process per agent, not per attempt: attempts within a leg
+    /// are sequential, and antigravity is native-only so it has just the one.
+    fn diag_log(&self) -> Option<PathBuf> {
+        match self {
+            Agent::Antigravity => Some(std::env::temp_dir().join(format!(
+                "postmortemthis-{}-{}.log",
+                self.name(),
+                std::process::id()
+            ))),
+            _ => None,
+        }
+    }
+
+    /// Read this agent's debug log back, delete it, and boil it down to the
+    /// reason the leg died - or None when the log says nothing useful. Always
+    /// call it after the process ends, even on success, so the file is cleaned
+    /// up; only show the result on a failure.
+    pub fn take_diagnosis(&self) -> Option<String> {
+        let path = self.diag_log()?;
+        let log = std::fs::read_to_string(&path).ok();
+        let _ = std::fs::remove_file(&path);
+        cause_from_log(&log?)
     }
 
     /// The base command that reaches this agent's CLI - through gg when a gg is
@@ -292,7 +346,24 @@ impl Agent {
         } else {
             let mut cmd = runner.base_command();
             cmd.args(self.workspace_args(repo));
+            // Before args(): antigravity's `-p` has to stay the last flag, as
+            // the runner appends the prompt right after it.
+            if let Some(log) = self.diag_log() {
+                // A stale log from a killed earlier run would be read back as
+                // this attempt's cause.
+                let _ = std::fs::remove_file(&log);
+                cmd.arg("--log-file").arg(&log);
+            }
             cmd.args(self.args());
+            if runner == Agent::Kimi {
+                let home =
+                    kimi::home().expect("attempt_plan rules out kimi without its scratch dir");
+                cmd.arg("--agent-file").arg(home.join("agent.yaml"));
+                cmd.arg("--mcp-config-file").arg(home.join("mcp.json"));
+                if openrouter {
+                    cmd.arg("--config-file").arg(home.join("config.toml"));
+                }
+            }
             cmd.current_dir(repo);
             cmd
         };
@@ -317,6 +388,10 @@ impl Agent {
     /// empty plan means there is nothing to try - no login and no key.
     pub fn attempt_plan(&self, skip_native: bool) -> Vec<bool> {
         let mut plan = Vec::new();
+        // Kimi without its agent file would run with every write tool approved.
+        if *self == Agent::Kimi && kimi::home().is_none() {
+            return plan;
+        }
         if self.authed() && !skip_native {
             plan.push(false);
         }
@@ -361,6 +436,7 @@ impl Agent {
             Agent::Qwen => "Alibaba",
             Agent::Vibe => "Mistral",
             Agent::Grok => "xAI",
+            Agent::Kimi => "Moonshot",
         }
     }
 
@@ -405,7 +481,7 @@ impl Agent {
     fn login_invocation(&self) -> Option<&'static [&'static str]> {
         match self {
             Agent::Claude | Agent::Antigravity => Some(&[]),
-            Agent::Codex | Agent::Grok => Some(&["login"]),
+            Agent::Codex | Agent::Grok | Agent::Kimi => Some(&["login"]),
             Agent::Qwen | Agent::Vibe => None,
         }
     }
@@ -441,6 +517,13 @@ impl Agent {
             ],
             // Grok's OpenRouter leg runs through codex, which reads the same key.
             Agent::Codex | Agent::Grok => vec![("OPENROUTER_API_KEY", key.to_string())],
+            // The model lives in the scratch config.toml; the key goes in by env
+            // so it is never written to disk. The base URL is in both: kimi
+            // lets a stray OPENAI_BASE_URL in the user's env beat the config.
+            Agent::Kimi => vec![
+                ("OPENAI_API_KEY", key.to_string()),
+                ("OPENAI_BASE_URL", "https://openrouter.ai/api/v1".into()),
+            ],
             // Antigravity has no OpenRouter route, so it is never run with
             // `openrouter` set - no env to inject.
             Agent::Antigravity => vec![],
@@ -475,6 +558,7 @@ impl Agent {
     /// run once per call site.
     fn native_probe(&self) -> Option<&'static (String, String)> {
         static CACHE: [OnceLock<Option<(String, String)>>; ALL.len()] = [
+            OnceLock::new(),
             OnceLock::new(),
             OnceLock::new(),
             OnceLock::new(),
@@ -557,6 +641,7 @@ impl Agent {
             // on login (NOT on install, unlike the ~/.grok dir), so it is a safe
             // signal. Either counts as usable headless auth.
             Agent::Grok => exists(".grok/auth.json") || env_set("XAI_API_KEY"),
+            Agent::Kimi => kimi::native_configured(&kimi::share_dir(Path::new(&home))),
             // Qwen and Vibe have no widely-held native login wired up; they
             // run through OpenRouter when a key is present (see attempt_plan).
             Agent::Qwen | Agent::Vibe => false,
@@ -570,18 +655,83 @@ impl Agent {
                 Agent::Codex => "logged in".into(),
                 Agent::Antigravity => "logged in (Google account)".into(),
                 Agent::Grok => "signed in (grok login or XAI_API_KEY)".into(),
+                Agent::Kimi => "logged in".into(),
                 Agent::Qwen | Agent::Vibe => "logged in".into(),
             }
         } else if matches!(self, Agent::Qwen | Agent::Vibe) {
             "runs via OpenRouter (needs a key; no native login wired up)".into()
         } else if matches!(self, Agent::Grok) {
             "not signed in - run `grok login`, or set XAI_API_KEY (console.x.ai)".into()
+        } else if matches!(self, Agent::Kimi) {
+            "not logged in - run `kimi login`".into()
         } else {
             format!(
                 "no credentials found - run `{}` once to log in",
                 self.name()
             )
         }
+    }
+}
+
+/// Boil an agent's own debug log (see `Agent::diag_log`) down to why the leg
+/// died, or None when it says nothing useful. Antigravity's is glog: tens of
+/// thousands of lines, of which the ones that matter are the retry loop it
+/// never prints - "Run: attempt 2 failed (RESOURCE_EXHAUSTED (code 429):
+/// Individual quota reached...), retrying in 7s".
+///
+/// Only the retry loop, and deliberately so. Every wider rule tried here fired
+/// on something cosmetic: "every line mentioning error or failed" picks up the
+/// screenful of "You are not logged into Antigravity" a HEALTHY run logs while
+/// auth warms up, and "every line carrying a gRPC status" picks up background
+/// chatter like a 503 on conversation-title generation - which arrives while
+/// the real turn is running fine, and would blame a plain too-short --timeout
+/// on the server. A cause we cannot pin to the turn itself is worse than no
+/// cause at all, because `run_notes` stops advising a longer timeout once it
+/// has one. Matching nothing is the safe failure: the caller just gets the
+/// unchanged "raise --timeout" note.
+fn cause_from_log(log: &str) -> Option<String> {
+    const MAX_LINES: usize = 5;
+    let mut seen = Vec::new();
+    let mut out: Vec<&str> = Vec::new();
+    for line in log.lines() {
+        let lower = line.to_ascii_lowercase();
+        if !(lower.contains("attempt") && lower.contains("failed")) {
+            continue;
+        }
+        let msg = strip_glog_prefix(line).trim();
+        if msg.is_empty() {
+            continue;
+        }
+        // One line per retry, identical but for the attempt number and the
+        // countdown, so dedupe on the shape and keep the first - the original
+        // cause, before the backoff buried it. The dot goes with the digits:
+        // the backoff prints "4s" then "7.697951167s", and on digits alone
+        // those two are still different shapes.
+        let shape: String = msg
+            .chars()
+            .filter(|c| !c.is_ascii_digit() && *c != '.')
+            .collect();
+        if seen.contains(&shape) {
+            continue;
+        }
+        seen.push(shape);
+        out.push(msg);
+        if out.len() == MAX_LINES {
+            break;
+        }
+    }
+    (!out.is_empty()).then(|| out.join("\n"))
+}
+
+/// Drop glog's `I0913 16:32:19.310138   369 run.go:389] ` header and return the
+/// message. A line that is not glog comes back untouched.
+fn strip_glog_prefix(line: &str) -> &str {
+    let mut chars = line.chars();
+    let glog = matches!(chars.next(), Some('I' | 'W' | 'E' | 'F'))
+        && chars.next().is_some_and(|c| c.is_ascii_digit());
+    match glog.then(|| line.split_once("] ")).flatten() {
+        Some((_, msg)) => msg,
+        None => line,
     }
 }
 

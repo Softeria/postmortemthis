@@ -1,6 +1,6 @@
 ---
 name: postmortemthis
-description: Fan one prompt across every coding agent on this machine (Claude Code, Codex, Antigravity, Qwen, Vibe, Grok) at once and synthesize their replies. A multi-agent second opinion on anything — a diff, an idea, a design, a question. Use when the user wants several agents to weigh in, asks for a "postmortem" or a second opinion, or runs /postmortemthis.
+description: Fan one prompt across every coding agent on this machine (Claude Code, Codex, Antigravity, Qwen, Vibe, Grok, Kimi) at once and synthesize their replies. A multi-agent second opinion on anything: a diff, an idea, a design, a question. Use when the user wants several agents to weigh in, asks for a "postmortem" or a second opinion, or runs /postmortemthis.
 ---
 
 # postmortemthis
@@ -12,24 +12,25 @@ skill builds the prompt, runs the fan-out, and synthesizes the answers.
 It is **read-only by default**: it reports what the agents say, it does not edit, stage,
 commit, or push. Applying fixes is a separate, explicit step.
 
-Each agent is held read-only by its own CLI - a sandbox, a tool allowlist, a deny-on-approval
-mode - with one exception: Antigravity has no such switch, so it runs in its plan mode, which
-refuses to write but is a persona rather than a sandbox. The wrapper compares `git status`
+Each agent is held read-only by its own CLI: a sandbox, a tool allowlist, a deny-on-approval
+mode. Two have no such switch. Kimi runs with its write and shell tools removed, and gets the
+diff in its prompt instead. Antigravity runs in its plan mode, which refuses to write but is a
+persona rather than a sandbox. The wrapper compares `git status`
 before and after the run and says so in the run notes if the tree moved.
 
 ## 1. Decide what to ask
 
 The prompt is whatever the user wants several agents to weigh in on. There is **no git
-requirement** — a postmortem can be about anything:
+requirement**. A postmortem can be about anything:
 
-- **Reviewing current work** — the sensible default when the user just runs
+- **Reviewing current work**: the sensible default when the user just runs
   `/postmortemthis` inside a repo with changes. Scope it to the uncommitted + branch
-  changes and ask for bugs, risks, and edge cases. Don't paste the diff into the prompt —
+  changes and ask for bugs, risks, and edge cases. Don't paste the diff into the prompt;
   the agents read the working tree themselves.
-- **An idea, plan, design, or question** — even in an empty folder. Just pass it through;
+- **An idea, plan, design, or question**, even in an empty folder. Just pass it through;
   no repo, no diff needed.
 - **Whatever the user named** as an argument (e.g. `/postmortemthis is this API shape
-  sane?`) — use that as the prompt directly.
+  sane?`): use that as the prompt directly.
 
 If it's genuinely ambiguous what they want a second opinion on, ask one short question
 rather than assuming a diff.
@@ -38,7 +39,7 @@ Keep the prompt to a focused single line about **what to look for**.
 
 ## 2. Get the wrapper (once)
 
-Use the local copy bundled next to this SKILL.md. Only fetch it if missing — don't
+Use the local copy bundled next to this SKILL.md. Only fetch it if missing; don't
 re-download and execute a remote script on every run:
 
 ```bash
@@ -50,11 +51,11 @@ sh "$cmd" doctor   # optional: show which agents are wired up
 ```
 
 If `doctor` reports zero agents, point the user at `sh "$cmd" login` (OpenRouter OAuth) or
-setting `OPENROUTER_API_KEY`. Don't run `login` yourself — it's interactive.
+setting `OPENROUTER_API_KEY`. Don't run `login` yourself, it's interactive.
 
 ## 3. Run
 
-Pipe the prompt on stdin. This drives several agents, so it can take a few minutes — give
+Pipe the prompt on stdin. This drives several agents and can take a few minutes, so give
 it a generous timeout, and persist the output so a killed or scrolled-past run isn't lost:
 
 ```bash
@@ -71,13 +72,13 @@ Announce the log path before the wait. Run the fan-out **once** per request; don
 ## 4. Synthesize
 
 Read from the log file, not the inline scrollback (which can truncate). Each agent answers
-independently, so you'll get several overlapping opinions — don't just dump them all:
+independently, so you'll get several overlapping opinions. Don't just dump them all:
 
-- **Consensus** — what more than one agent flagged (highest signal).
-- **Notable single-agent points** — worth a look even if only one raised them.
-- **Disagreements / likely false positives** — where agents conflict or are clearly wrong.
+- **Consensus**: what more than one agent flagged (highest signal).
+- **Notable single-agent points**: worth a look even if only one raised them.
+- **Disagreements / likely false positives**: where agents conflict or are clearly wrong.
 - Cite `file:line` where the agents did.
 
-Lead your reply with the log path, keep the synthesis tight, and end with a clear takeaway
-— for a review, a ship / no-ship call; for an idea, where the agents agreed and where they
+Lead your reply with the log path, keep the synthesis tight, and end with a clear takeaway:
+for a review, a ship / no-ship call; for an idea, where the agents agreed and where they
 pushed back.
