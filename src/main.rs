@@ -1,5 +1,6 @@
 mod agents;
 mod gg;
+mod kimi;
 mod login;
 mod openrouter;
 mod runner;
@@ -158,13 +159,15 @@ fn run(args: RunArgs) -> Result<()> {
     );
 
     // Antigravity's leg is held read-only by a persona, not a sandbox (see
-    // agents::Agent::args), so "it did not write" is an assumption about a CLI
-    // that moves fast. Better to notice than to trust a comment.
+    // agents::Agent::args), and kimi's by a config file that strips its write
+    // tools (see kimi.rs), so "it did not write" is an assumption about CLIs
+    // that move fast. Better to notice than to trust a comment.
     let tree_before = tree_state(&cwd);
 
     let reports = execute(&selected, &skip_native, &prompt, &cwd, timeout)?;
 
-    let tree_touched = selected.contains(&Agent::Antigravity)
+    let watched = [Agent::Antigravity, Agent::Kimi];
+    let tree_touched = selected.iter().any(|a| watched.contains(a))
         && tree_before.is_some()
         && tree_state(&cwd) != tree_before;
 
@@ -210,19 +213,33 @@ fn report_section(r: &Report) -> String {
     } else {
         "native login".to_string()
     };
+    // A timeout gets the detail too, not just a failure: an agent can burn the
+    // whole timeout on something it never printed (see Agent::diag_log), and
+    // "_timed out_" alone sends the caller off to raise --timeout for nothing.
+    let detail = failure_detail(r);
+    let with_detail = |head: String| match detail.is_empty() {
+        true => head,
+        false => format!("{head}\n\n```\n{detail}\n```"),
+    };
     let body = match &r.outcome {
         Outcome::Ok => r.output.trim().to_string(),
-        Outcome::TimedOut => "_timed out_".to_string(),
-        Outcome::Failed(why) => {
-            let detail = condense_failure(&r.stderr);
-            if detail.is_empty() {
-                format!("_failed: {why}_")
-            } else {
-                format!("_failed: {why}_\n\n```\n{detail}\n```")
-            }
-        }
+        Outcome::TimedOut => with_detail("_timed out_".to_string()),
+        Outcome::Failed(why) => with_detail(format!("_failed: {why}_")),
     };
     format!("# {} ({provenance})\n\n{body}\n", r.agent.name())
+}
+
+/// What a dead leg had to say: both pipes, then its own log's diagnosis. stdout
+/// is not only for the answer: kimi prints its API errors there ("Error code:
+/// 402 ...") and keeps stderr for "To resume this session", which would be all
+/// the report showed.
+fn failure_detail(r: &Report) -> String {
+    let detail = condense_failure(&format!("{}\n{}", r.output, r.stderr));
+    match &r.diagnosis {
+        Some(cause) if detail.is_empty() => cause.clone(),
+        Some(cause) => format!("{detail}\n{cause}"),
+        None => detail,
+    }
 }
 
 /// Trim a failed agent's stderr down to something readable. Agents often log the
@@ -293,7 +310,7 @@ fn run_notes(
 
     if tree_touched {
         notes.push(
-            "- the working tree changed while the agents ran. Every leg but antigravity is held read-only by its own CLI; antigravity's plan mode is a persona, not a sandbox, so it is the one to suspect. Run `git status` and `git diff` before trusting the review above.".to_string(),
+            "- the working tree changed while the agents ran. Most legs are held read-only by their own CLI's switch; antigravity's plan mode is a persona, not a sandbox, and kimi's write tools are stripped by a config file, so those two are the ones to suspect. Run `git status` and `git diff` before trusting the review above.".to_string(),
         );
     }
 
@@ -307,9 +324,16 @@ fn run_notes(
             ));
         }
         if r.outcome == Outcome::TimedOut {
-            notes.push(format!(
-                "- {name}: timed out. Raise --timeout or shorten the prompt."
-            ));
+            // A timeout that came with a reason is not a slow model, and more
+            // --timeout just buys more of the same error: antigravity backing
+            // off a 429 will sit there all day. Point at the reason instead.
+            notes.push(if r.diagnosis.is_none() {
+                format!("- {name}: timed out. Raise --timeout or shorten the prompt.")
+            } else {
+                format!(
+                    "- {name}: timed out, but it logged why - see its section above. Raising --timeout will not help if that is a quota or auth error."
+                )
+            });
         }
         // Exit status is a poor test of "answered": an agent can exit 0 having
         // printed "I have created a plan, please review it", or nothing at all
@@ -472,6 +496,7 @@ fn execute(
     timeout: Duration,
 ) -> Result<Vec<Report>> {
     let _vibe = start_vibe_home(selected);
+    let _kimi = start_kimi_home(selected);
     prewarm(selected, cwd);
     runner::run_all(selected, prompt, cwd, timeout, skip_native)
 }
@@ -613,3 +638,18 @@ fn start_vibe_home(selected: &[Agent]) -> Option<vibe::Home> {
     }
 }
 
+/// Write kimi's scratch dir (agent file, empty MCP config, OpenRouter config)
+/// when kimi is selected. Unlike vibe's it is needed on the native leg too:
+/// the agent file is what keeps kimi read-only.
+fn start_kimi_home(selected: &[Agent]) -> Option<kimi::Home> {
+    if !selected.contains(&Agent::Kimi) {
+        return None;
+    }
+    match kimi::Home::create(Agent::Kimi.openrouter_model().expect("kimi has an OpenRouter model")) {
+        Ok(home) => Some(home),
+        Err(e) => {
+            eprintln!("postmortemthis: could not prepare kimi's read-only agent file ({e}); skipping kimi");
+            None
+        }
+    }
+}

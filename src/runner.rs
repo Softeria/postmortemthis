@@ -19,6 +19,11 @@ pub struct Report {
     /// A native attempt was made and failed, then OpenRouter was used. Drives
     /// the "your native login failed" run note.
     pub fell_back: bool,
+    /// Why the leg died, from the agent's own log (see `Agent::diag_log`), when
+    /// it died and the log said. Its own field, not folded into stderr: the run
+    /// notes key off it, and some agents never leave stderr empty (kimi always
+    /// prints "To resume this session").
+    pub diagnosis: Option<String>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -90,7 +95,9 @@ fn run_one(agent: Agent, prompt: &str, repo: &Path, timeout: Duration, skip_nati
     if plan.is_empty() {
         // A native-only agent (antigravity) has no OpenRouter fallback, so
         // the failure is purely "not logged in" - don't mention a key it can't use.
-        let why = if agent.supports_openrouter() {
+        let why = if agent == Agent::Kimi && crate::kimi::home().is_none() {
+            "could not write its read-only agent file (see the warning above)"
+        } else if agent.supports_openrouter() {
             "no usable login and no OpenRouter key"
         } else {
             "no usable login (native-only; cannot use OpenRouter)"
@@ -102,6 +109,7 @@ fn run_one(agent: Agent, prompt: &str, repo: &Path, timeout: Duration, skip_nati
             elapsed: started.elapsed(),
             outcome: Outcome::Failed(why.into()),
             used_openrouter: false,
+            diagnosis: None,
             fell_back: false,
         };
     }
@@ -151,7 +159,7 @@ fn run_attempt(
 ) -> Report {
     let started = Instant::now();
     let mut cmd = agent.command(repo, openrouter);
-    let prompt = agent.decorate_prompt(prompt);
+    let prompt = agent.decorate_prompt(prompt, repo);
     let prompt = prompt.as_ref();
     // Most read the prompt on stdin; vibe (always) and grok's native leg take it
     // as a trailing argument and get no stdin.
@@ -176,6 +184,7 @@ fn run_attempt(
                 elapsed: started.elapsed(),
                 outcome: Outcome::Failed(format!("failed to spawn: {e}")),
                 used_openrouter: openrouter,
+                diagnosis: None,
                 fell_back: false,
             };
         }
@@ -206,6 +215,7 @@ fn run_attempt(
                 elapsed: started.elapsed(),
                 outcome: Outcome::Failed(format!("wait failed: {e}")),
                 used_openrouter: openrouter,
+                diagnosis: None,
                 fell_back: false,
             };
         }
@@ -221,6 +231,10 @@ fn run_attempt(
         Some(s) if s.success() => Outcome::Ok,
         Some(s) => Outcome::Failed(s.to_string()),
     };
+    // Unconditionally, even on success: this also deletes the log file. An
+    // agent that keeps its reasons to itself (antigravity on a 429 says nothing
+    // on either pipe - see Agent::diag_log) only explains itself here.
+    let diagnosis = agent.take_diagnosis().filter(|_| outcome != Outcome::Ok);
 
     Report {
         agent,
@@ -229,6 +243,7 @@ fn run_attempt(
         elapsed: started.elapsed(),
         outcome,
         used_openrouter: openrouter,
+        diagnosis,
         fell_back: false,
     }
 }
