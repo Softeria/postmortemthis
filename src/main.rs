@@ -1,4 +1,6 @@
 mod agents;
+mod gemshim;
+mod gemshim_server;
 mod gg;
 mod kimi;
 mod login;
@@ -50,6 +52,10 @@ enum Cmd {
         /// Agent to configure (default: all).
         agent: Option<String>,
     },
+    /// Internal: run the Antigravity->OpenRouter bridge server. Spawned by the
+    /// tool itself; not for direct use.
+    #[command(name = "__gemshim", hide = true)]
+    Gemshim,
 }
 
 #[derive(clap::Args, Default)]
@@ -93,6 +99,10 @@ fn main() -> Result<()> {
     match cli.command {
         Some(Cmd::Login) => login::run(),
         Some(Cmd::Doctor) => doctor(),
+        Some(Cmd::Gemshim) => {
+            gemshim_server::run();
+            Ok(())
+        }
         Some(Cmd::Setup { agent }) => {
             // Resolve an optional agent name via the same parser (and error
             // message) as --agents; None means configure all.
@@ -350,7 +360,7 @@ fn run_notes(
     // Agents that exist but were not run for lack of usable credentials. An
     // OpenRouter-capable agent is runnable whenever a key is present (whether or
     // not it was requested), so flag it only when there is no key. A native-only
-    // agent (antigravity) can't use the key at all, so flag it whenever it
+    // agent can't use the key at all, so flag it whenever it
     // lacks its own login - even with a key set - and point it at that login.
     let has_key = openrouter::key().is_some();
     for agent in agents::ALL {
@@ -497,6 +507,7 @@ fn execute(
 ) -> Result<Vec<Report>> {
     let _vibe = start_vibe_home(selected);
     let _kimi = start_kimi_home(selected);
+    let _bridge = start_gemshim(selected);
     prewarm(selected, cwd);
     runner::run_all(selected, prompt, cwd, timeout, skip_native)
 }
@@ -537,7 +548,7 @@ fn select_agents(requested: &[String], settings: &settings::Settings) -> Result<
             // Auto-pick an available agent (native on PATH or gg-bootstrappable)
             // only if it can actually run: explicitly requested, its own login, or
             // an OpenRouter key it can actually use. The key check is gated on
-            // supports_openrouter() so a native-only agent (antigravity) is
+            // supports_openrouter() so a native-only agent is
             // not auto-selected on key-presence alone only to fail with an empty
             // attempt plan. Native and gg share this gate - otherwise an
             // installed-but-logged-out native-only agent would be selected
@@ -550,7 +561,7 @@ fn select_agents(requested: &[String], settings: &settings::Settings) -> Result<
                 selected.push(agent)
             }
             Some(_) => {
-                // Native-only agents (antigravity) have no OpenRouter
+                // Native-only agents have no OpenRouter
                 // route, so --key can't help them - don't suggest it.
                 let how = if agent.supports_openrouter() {
                     "log in once, or pass --key"
@@ -633,6 +644,24 @@ fn start_vibe_home(selected: &[Agent]) -> Option<vibe::Home> {
         Ok(home) => Some(home),
         Err(e) => {
             eprintln!("postmortemthis: could not prepare vibe home ({e}); the vibe leg will fail");
+            None
+        }
+    }
+}
+
+/// Bring up the gemshim bridge when the Antigravity leg may run on OpenRouter
+/// (selected and a key is present). Up front even when the native login will
+/// probably work: the fallback is decided mid-run, after a 429. Held for the run.
+fn start_gemshim(selected: &[Agent]) -> Option<gemshim::Bridge> {
+    if !(selected.contains(&Agent::Antigravity) && openrouter::key().is_some()) {
+        return None;
+    }
+    let key = openrouter::key()?;
+    let model = Agent::Antigravity.openrouter_model().expect("antigravity has an OpenRouter model");
+    match gemshim::Bridge::start(key, model) {
+        Ok(bridge) => Some(bridge),
+        Err(e) => {
+            eprintln!("postmortemthis: could not start the antigravity OpenRouter bridge ({e}); antigravity has no OpenRouter fallback this run");
             None
         }
     }

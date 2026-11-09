@@ -93,10 +93,15 @@ fn run_one(agent: Agent, prompt: &str, repo: &Path, timeout: Duration, skip_nati
     let started = Instant::now();
     let plan = agent.attempt_plan(skip_native);
     if plan.is_empty() {
-        // A native-only agent (antigravity) has no OpenRouter fallback, so
-        // the failure is purely "not logged in" - don't mention a key it can't use.
+        // A native-only agent has no OpenRouter fallback, so the failure is
+        // purely "not logged in" - don't mention a key it can't use.
         let why = if agent == Agent::Kimi && crate::kimi::home().is_none() {
             "could not write its read-only agent file (see the warning above)"
+        } else if agent == Agent::Antigravity
+            && crate::openrouter::key().is_some()
+            && crate::gemshim::endpoint().is_none()
+        {
+            "no usable login, and its OpenRouter bridge did not start (see the warning above)"
         } else if agent.supports_openrouter() {
             "no usable login and no OpenRouter key"
         } else {
