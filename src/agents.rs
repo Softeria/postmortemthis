@@ -1,3 +1,4 @@
+use crate::gemshim;
 use crate::gg;
 use crate::kimi;
 use crate::openrouter;
@@ -7,6 +8,19 @@ use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::OnceLock;
+
+/// Env stripped from Antigravity's OpenRouter leg. GOOGLE_API_KEY beats
+/// GEMINI_API_KEY, and the Vertex/ADC ones could route the Gemini SDK away
+/// from GOOGLE_GEMINI_BASE_URL. OPENROUTER_API_KEY is the real key: the leg
+/// runs a shell, and only gemshim needs it.
+const ANTIGRAVITY_OPENROUTER_UNSET: &[&str] = &[
+    "GOOGLE_API_KEY",
+    "GOOGLE_GENAI_USE_VERTEXAI",
+    "GOOGLE_GENAI_USE_ENTERPRISE",
+    "GOOGLE_APPLICATION_CREDENTIALS",
+    "GOOGLE_CLOUD_PROJECT",
+    "OPENROUTER_API_KEY",
+];
 
 /// Appended to Antigravity's prompt only; see `Agent::decorate_prompt`. The
 /// "do not modify" half earns its place: read-only on that leg is plan mode's
@@ -118,9 +132,9 @@ impl Agent {
             Agent::Codex => Some("openai/gpt-5"),
             Agent::Qwen => Some("qwen/qwen3-coder"),
             Agent::Vibe => Some("mistralai/mistral-medium-3.1"),
-            // Antigravity is native-only: no OpenRouter model. None (not a fake
-            // slug) so the type forces callers to have already ruled this out.
-            Agent::Antigravity => None,
+            // Same Antigravity harness in its Gemini API key mode, pointed at
+            // the local gemshim bridge, which forwards to this slug.
+            Agent::Antigravity => Some("google/gemini-4-argon"),
             // Grok's OpenRouter leg drives its own model through codex's harness.
             Agent::Grok => Some("x-ai/grok-build-0.1"),
             Agent::Kimi => Some("moonshotai/kimi-k3"),
@@ -296,8 +310,12 @@ impl Agent {
     /// The cause only ever exists in `--log-file`, so we ask for one and read
     /// it back (see `take_diagnosis`).
     ///
+    /// That is the transient 429. The weekly "Individual quota reached" one is
+    /// final: Antigravity prints `AGY_ERROR` and exits 1 within seconds (seen
+    /// 2026-11-09), which is a `Failed` and so falls back to OpenRouter.
+    ///
     /// One path per process per agent, not per attempt: attempts within a leg
-    /// are sequential, and antigravity is native-only so it has just the one.
+    /// are sequential, and each one clears the log before it starts.
     fn diag_log(&self) -> Option<PathBuf> {
         match self {
             Agent::Antigravity => Some(std::env::temp_dir().join(format!(
@@ -348,6 +366,13 @@ impl Agent {
             cmd.args(self.workspace_args(repo));
             // Before args(): antigravity's `-p` has to stay the last flag, as
             // the runner appends the prompt right after it.
+            if openrouter && runner == Agent::Antigravity {
+                // Session-only, never saved: the Google login stays the default.
+                cmd.arg("--settings").arg(r#"{"modelProvider":"gemini"}"#);
+                for var in ANTIGRAVITY_OPENROUTER_UNSET {
+                    cmd.env_remove(var);
+                }
+            }
             if let Some(log) = self.diag_log() {
                 // A stale log from a killed earlier run would be read back as
                 // this attempt's cause.
@@ -401,9 +426,10 @@ impl Agent {
         plan
     }
 
-    /// A native-only agent has no OpenRouter route at all - only Antigravity
-    /// (Google). Derived from `openrouter_model()` so "has an OpenRouter route"
-    /// has ONE source: an agent with no model slug is native-only, and every
+    /// A native-only agent has no OpenRouter route at all. No agent is one
+    /// right now (Antigravity got a route through gemshim); the guard stays
+    /// for the next agent that has none. Derived from `openrouter_model()` so
+    /// "has an OpenRouter route" has ONE source: an agent with no model slug is native-only, and every
     /// capability and guard below follows from it - they can't disagree. (Grok
     /// is NOT native-only: its own CLI can't reach OpenRouter, but its model
     /// x-ai/grok-build-0.1 is there and its OpenRouter leg borrows codex's
@@ -471,6 +497,7 @@ impl Agent {
         self.openrouter_reachable()
             && match self {
                 Agent::Vibe => vibe::home().is_some(),
+                Agent::Antigravity => gemshim::endpoint().is_some(),
                 _ => true,
             }
     }
@@ -524,9 +551,18 @@ impl Agent {
                 ("OPENAI_API_KEY", key.to_string()),
                 ("OPENAI_BASE_URL", "https://openrouter.ai/api/v1".into()),
             ],
-            // Antigravity has no OpenRouter route, so it is never run with
-            // `openrouter` set - no env to inject.
-            Agent::Antigravity => vec![],
+            // Gemini API key mode against the local gemshim bridge. The "key"
+            // is gemshim's per-run secret; gemshim holds the real OpenRouter
+            // key, and `command` strips it (and the Google/Vertex vars that
+            // would win over this mode) from Antigravity's env.
+            Agent::Antigravity => {
+                let (port, secret) =
+                    gemshim::endpoint().expect("attempt_plan rules out antigravity without its bridge");
+                vec![
+                    ("GEMINI_API_KEY", secret.to_string()),
+                    ("GOOGLE_GEMINI_BASE_URL", format!("http://127.0.0.1:{port}")),
+                ]
+            }
             // Qwen Code speaks the OpenAI-compatible API directly, so it needs
             // no bridge: point its OpenAI client at OpenRouter on the key.
             Agent::Qwen => vec![

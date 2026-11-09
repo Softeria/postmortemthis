@@ -23,11 +23,14 @@ dialoguer = { version = "0.12", default-features = false }
 # it and console re-raises SIGINT, so the process would die with it hidden).
 ctrlc = "3"
 # `postmortemthis login` runs the OpenRouter token exchange on a small async
-# runtime; the normal launcher path never starts one. `net` is needed for the
+# runtime, and so does the hidden `__gemshim` bridge; the normal launcher path
+# never starts one. `net` is needed for the
 # IO driver reqwest's HTTP call drives under `block_on`/`enable_all` - reqwest
 # pulls it in transitively too, but declare it so this manifest is honest about
 # what it relies on.
 tokio = { version = "1", features = ["rt", "net", "time"] }
+# The hidden `__gemshim` bridge (Antigravity -> OpenRouter, see gemshim.rs).
+axum = "0.7"
 reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
 serde_json = "1"
 # `postmortemthis login`: PKCE OAuth against OpenRouter (verifier randomness, the
