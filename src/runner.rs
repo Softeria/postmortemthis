@@ -21,8 +21,8 @@ pub struct Report {
     pub fell_back: bool,
     /// Why the leg died, from the agent's own log (see `Agent::diag_log`), when
     /// it died and the log said. Its own field, not folded into stderr: the run
-    /// notes key off it, and some agents never leave stderr empty (kimi always
-    /// prints "To resume this session").
+    /// notes key off it, and some agents never leave stderr empty (kimi prints
+    /// its thinking and tool progress there).
     pub diagnosis: Option<String>,
 }
 
@@ -154,7 +154,8 @@ fn mode_label(openrouter: bool) -> &'static str {
 }
 
 /// Run a single attempt to completion with a timeout. The prompt goes in on
-/// stdin. `openrouter` selects the native-login or OpenRouter command.
+/// stdin or as the last argument (see `Agent::reads_stdin`). `openrouter`
+/// selects the native-login or OpenRouter command.
 fn run_attempt(
     agent: Agent,
     prompt: &str,
@@ -166,11 +167,11 @@ fn run_attempt(
     let mut cmd = agent.command(repo, openrouter);
     let prompt = agent.decorate_prompt(prompt, repo);
     let prompt = prompt.as_ref();
-    // Most read the prompt on stdin; vibe (always) and grok's native leg take it
-    // as a trailing argument and get no stdin.
+    // Most read the prompt on stdin; vibe, antigravity, kimi and grok's native
+    // leg take it as a trailing argument and get no stdin.
     let on_stdin = agent.reads_stdin(openrouter);
     if !on_stdin {
-        cmd.arg(prompt);
+        cmd.arg(agent.prompt_arg(prompt));
     }
     cmd.stdin(if on_stdin { Stdio::piped() } else { Stdio::null() })
         .stdout(Stdio::piped())
@@ -229,13 +230,19 @@ fn run_attempt(
         kill_tree(&mut child, &mut group_killed);
     }
 
-    let output = recv_drained(&out_rx, &mut child, &mut group_killed);
+    let mut output = recv_drained(&out_rx, &mut child, &mut group_killed);
     let stderr = recv_drained(&err_rx, &mut child, &mut group_killed);
     let outcome = match status {
         None => Outcome::TimedOut,
         Some(s) if s.success() => Outcome::Ok,
         Some(s) => Outcome::Failed(s.to_string()),
     };
+    // Only an answer gets cut down to the final message. A dead leg keeps its
+    // raw lines: kimi reports retries and errors as JSON on stdout
+    // (`turn.step.retrying` with the status code), and that is the reason.
+    if agent == Agent::Kimi && outcome == Outcome::Ok {
+        output = crate::kimi::final_message(&output);
+    }
     // Unconditionally, even on success: this also deletes the log file. An
     // agent that keeps its reasons to itself (antigravity on a 429 says nothing
     // on either pipe - see Agent::diag_log) only explains itself here.
