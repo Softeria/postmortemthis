@@ -169,8 +169,8 @@ fn run(args: RunArgs) -> Result<()> {
     );
 
     // Antigravity's leg is held read-only by a persona, not a sandbox (see
-    // agents::Agent::args), and kimi's by a config file that strips its write
-    // tools (see kimi.rs), so "it did not write" is an assumption about CLIs
+    // agents::Agent::args), and kimi's by an agent file that allowlists its
+    // read tools (see kimi.rs), so "it did not write" is an assumption about CLIs
     // that move fast. Better to notice than to trust a comment.
     let tree_before = tree_state(&cwd);
 
@@ -240,9 +240,8 @@ fn report_section(r: &Report) -> String {
 }
 
 /// What a dead leg had to say: both pipes, then its own log's diagnosis. stdout
-/// is not only for the answer: kimi prints its API errors there ("Error code:
-/// 402 ...") and keeps stderr for "To resume this session", which would be all
-/// the report showed.
+/// is not only for the answer: kimi reports its retries and API errors there,
+/// as JSON lines with the status code, while stderr carries its thinking.
 fn failure_detail(r: &Report) -> String {
     let detail = condense_failure(&format!("{}\n{}", r.output, r.stderr));
     match &r.diagnosis {
@@ -320,7 +319,7 @@ fn run_notes(
 
     if tree_touched {
         notes.push(
-            "- the working tree changed while the agents ran. Most legs are held read-only by their own CLI's switch; antigravity's plan mode is a persona, not a sandbox, and kimi's write tools are stripped by a config file, so those two are the ones to suspect. Run `git status` and `git diff` before trusting the review above.".to_string(),
+            "- the working tree changed while the agents ran. Most legs are held read-only by their own CLI's switch; antigravity's plan mode is a persona, not a sandbox, and kimi's tools are cut down by an agent file, so those two are the ones to suspect. Run `git status` and `git diff` before trusting the review above.".to_string(),
         );
     }
 
@@ -667,14 +666,14 @@ fn start_gemshim(selected: &[Agent]) -> Option<gemshim::Bridge> {
     }
 }
 
-/// Write kimi's scratch dir (agent file, empty MCP config, OpenRouter config)
-/// when kimi is selected. Unlike vibe's it is needed on the native leg too:
-/// the agent file is what keeps kimi read-only.
+/// Write kimi's scratch dir (agent file, diff, OpenRouter home) when kimi is
+/// selected. Unlike vibe's it is needed on the native leg too: the agent file
+/// is what keeps kimi read-only.
 fn start_kimi_home(selected: &[Agent]) -> Option<kimi::Home> {
     if !selected.contains(&Agent::Kimi) {
         return None;
     }
-    match kimi::Home::create(Agent::Kimi.openrouter_model().expect("kimi has an OpenRouter model")) {
+    match kimi::Home::create() {
         Ok(home) => Some(home),
         Err(e) => {
             eprintln!("postmortemthis: could not prepare kimi's read-only agent file ({e}); skipping kimi");

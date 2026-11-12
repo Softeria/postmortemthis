@@ -31,8 +31,8 @@ workspace - this is a review, not a change.";
 
 /// A supported agent CLI. Each runs headless in the repo's cwd, using its own
 /// native harness and whatever auth the user already has. All read-only, most by
-/// their own CLI's switch. Kimi has none, so its write tools are removed (see
-/// `kimi.rs`); Antigravity has none either and rides on its plan mode instead
+/// their own CLI's switch. Kimi has none, so an agent file allowlists its
+/// read tools (see `kimi.rs`); Antigravity has none either and rides on its plan mode instead
 /// (see `args`), so main.rs watches the tree for it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Agent {
@@ -94,11 +94,12 @@ impl Agent {
     }
 
     /// Does this agent take the prompt on stdin? It depends on the CLI that runs
-    /// the leg (grok borrows codex on OpenRouter). Vibe, antigravity and grok's
-    /// own CLI take the prompt as `-p`'s value; every other harness reads stdin.
+    /// the leg (grok borrows codex on OpenRouter). Vibe, antigravity, kimi and
+    /// grok's own CLI take the prompt as `-p`'s value; every other harness reads
+    /// stdin.
     pub fn reads_stdin(&self, openrouter: bool) -> bool {
         let runner = if openrouter { self.openrouter_runner() } else { *self };
-        !matches!(runner, Agent::Vibe | Agent::Grok | Agent::Antigravity)
+        !matches!(runner, Agent::Vibe | Agent::Grok | Agent::Antigravity | Agent::Kimi)
     }
 
     /// The tool name in gg's registry. grok is the `grok` tool added in gg 187,
@@ -108,7 +109,8 @@ impl Agent {
     /// `antigravity-cli` and not `antigravity` on purpose: gg caches it under the
     /// repo name whatever alias you run, and until gg 200 `gg update` looked it up
     /// by cache name, so `update antigravity` silently found nothing. Fixed since,
-    /// but the cache name is the one that works on every gg. Same for kimi.
+    /// but the cache name is the one that works on every gg. Same for kimi, whose
+    /// cache name is `kimi-code` since gg moved it off the Python kimi-cli.
     pub fn gg_tool(&self) -> &'static str {
         match self {
             Agent::Claude => "claude",
@@ -117,7 +119,7 @@ impl Agent {
             Agent::Qwen => "qwen",
             Agent::Vibe => "vibe",
             Agent::Grok => "grok",
-            Agent::Kimi => "kimi-cli",
+            Agent::Kimi => "kimi-code",
         }
     }
 
@@ -262,9 +264,11 @@ impl Agent {
             // `-p` (alias --single) takes the prompt as its value, not on stdin,
             // so it goes last and the runner appends the prompt (see reads_stdin).
             Agent::Grok => vec!["--permission-mode", "dontAsk", "-p"],
-            // `--quiet` spelled out: print mode, plain text, final answer only.
-            // Read-only comes from the agent file `command` adds, not from here.
-            Agent::Kimi => vec!["--print", "--output-format", "text", "--final-message-only"],
+            // JSON lines, so the runner can keep the final answer alone (see
+            // kimi::final_message). Read-only comes from the agent file
+            // `command` adds, not from here. The prompt follows as one
+            // `--prompt=` argument (see prompt_arg).
+            Agent::Kimi => vec!["--output-format", "stream-json"],
         }
     }
 
@@ -273,19 +277,45 @@ impl Agent {
     /// artifact file and not repeat them in the reply, so the review landed in
     /// its brain dir and stdout got "I have created a plan, please review it".
     /// The coda pulls it back into the reply. Kimi has no shell (see `kimi.rs`),
-    /// so it gets the diff it cannot fetch. Everyone else gets it untouched.
+    /// so it gets the diff it cannot fetch, as a file to read. Everyone else gets
+    /// it untouched.
     pub fn decorate_prompt<'a>(&self, prompt: &'a str, repo: &Path) -> Cow<'a, str> {
         match self {
             Agent::Antigravity => Cow::Owned(format!("{prompt}{ANTIGRAVITY_CODA}")),
-            Agent::Kimi => Cow::Owned(match kimi::diff_for_prompt(repo) {
-                Some(diff) => format!(
-                    "{prompt}\n\n---\nYou have no shell in this run, so you cannot run git. \
-                     In case the request is about the current changes, here they are. Files \
-                     marked ?? are new and not in the diff; read them yourself.\n\n{diff}"
-                ),
-                None => format!("{prompt}\n\n---\nYou have no shell in this run."),
-            }),
+            Agent::Kimi => {
+                let full = match kimi::diff_file(repo) {
+                    Some(diff) => format!(
+                        "{prompt}\n\n---\nYou have no shell in this run, so you cannot run \
+                         git. In case the request is about the current changes, `git status \
+                         --short` and `git diff HEAD` are in {}; read it with Read. It can be \
+                         long: keep paging with line_offset until you reach the end. Files \
+                         marked ?? are new and not in the diff; read them yourself.",
+                        diff.display()
+                    ),
+                    None => format!("{prompt}\n\n---\nYou have no shell in this run."),
+                };
+                // The prompt rides in argv (see reads_stdin), so one argv cannot
+                // carry goes in a file and argv gets a one-line pointer.
+                Cow::Owned(match kimi::request_file(&full) {
+                    Some(path) => format!(
+                        "Your request is in {}. Read all of it with Read, then answer it.",
+                        path.display()
+                    ),
+                    None => full,
+                })
+            }
             _ => Cow::Borrowed(prompt),
+        }
+    }
+
+    /// The prompt as the last argument, for an agent that does not read stdin.
+    /// Kimi's in the `--prompt=` form: as a separate value after `-p`, a prompt
+    /// that starts with `--` is parsed as a flag of its own (`-p --version`
+    /// prints the version).
+    pub fn prompt_arg(&self, prompt: &str) -> OsString {
+        match self {
+            Agent::Kimi => format!("--prompt={prompt}").into(),
+            _ => prompt.into(),
         }
     }
 
@@ -351,8 +381,8 @@ impl Agent {
 
     /// Build the review command, via the native CLI or through gg. When
     /// `openrouter` is set, the CLI is pointed at OpenRouter on the resolved
-    /// key; otherwise it runs on the user's own login. The caller pipes the
-    /// prompt to stdin.
+    /// key; otherwise it runs on the user's own login. The caller hands over the
+    /// prompt, on stdin or as the last argument (see `reads_stdin`).
     pub fn command(&self, repo: &Path, openrouter: bool) -> Command {
         // The CLI that runs this leg: normally self, but on the OpenRouter leg an
         // agent may borrow another's harness (grok -> codex).
@@ -379,16 +409,31 @@ impl Agent {
                 let _ = std::fs::remove_file(&log);
                 cmd.arg("--log-file").arg(&log);
             }
-            cmd.args(self.args());
             if runner == Agent::Kimi {
                 let home =
                     kimi::home().expect("attempt_plan rules out kimi without its scratch dir");
-                cmd.arg("--agent-file").arg(home.join("agent.yaml"));
-                cmd.arg("--mcp-config-file").arg(home.join("mcp.json"));
+                cmd.arg("--agent-file").arg(home.join(kimi::AGENT_FILE));
+                // Where the diff file is (see decorate_prompt).
+                cmd.arg("--add-dir").arg(&home);
                 if openrouter {
-                    cmd.arg("--config-file").arg(home.join("config.toml"));
+                    cmd.env("KIMI_CODE_HOME", kimi::openrouter_home(&home));
+                    // Any KIMI_MODEL_* in the user's shell would shape the
+                    // provider openrouter_env builds; that sets its own after.
+                    for (name, _) in std::env::vars_os() {
+                        if name.to_string_lossy().starts_with("KIMI_MODEL_") {
+                            cmd.env_remove(name);
+                        }
+                    }
                 }
+                // gg owns kimi's updates.
+                cmd.env("KIMI_CODE_NO_AUTO_UPDATE", "1");
+                cmd.env("KIMI_DISABLE_TELEMETRY", "1");
+                // A trusted workspace loads the repo's own .kimi-code/mcp.json,
+                // whose stdio servers are commands run at session start - and
+                // the repo is the code under review.
+                cmd.env_remove("KIMI_CODE_TRUST_WORKSPACE");
             }
+            cmd.args(self.args());
             cmd.current_dir(repo);
             cmd
         };
@@ -544,12 +589,20 @@ impl Agent {
             ],
             // Grok's OpenRouter leg runs through codex, which reads the same key.
             Agent::Codex | Agent::Grok => vec![("OPENROUTER_API_KEY", key.to_string())],
-            // The model lives in the scratch config.toml; the key goes in by env
-            // so it is never written to disk. The base URL is in both: kimi
-            // lets a stray OPENAI_BASE_URL in the user's env beat the config.
+            // KIMI_MODEL_* builds a provider in memory, so the key never touches
+            // disk. Type `kimi` (also OpenAI-compatible) and not `openai`: only
+            // the kimi provider honours the completion cap, and without one
+            // kimi-code asks for 131072 tokens, which OpenRouter refuses on a
+            // thin balance ("requires more credits").
             Agent::Kimi => vec![
-                ("OPENAI_API_KEY", key.to_string()),
-                ("OPENAI_BASE_URL", "https://openrouter.ai/api/v1".into()),
+                (
+                    "KIMI_MODEL_NAME",
+                    self.openrouter_model().expect("kimi has an OpenRouter model").into(),
+                ),
+                ("KIMI_MODEL_API_KEY", key.to_string()),
+                ("KIMI_MODEL_PROVIDER_TYPE", "kimi".into()),
+                ("KIMI_MODEL_BASE_URL", "https://openrouter.ai/api/v1".into()),
+                ("KIMI_MODEL_MAX_COMPLETION_TOKENS", "32000".into()),
             ],
             // Gemini API key mode against the local gemshim bridge. The "key"
             // is gemshim's per-run secret; gemshim holds the real OpenRouter
