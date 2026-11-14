@@ -88,7 +88,9 @@ fn recv_drained(rx: &mpsc::Receiver<String>, child: &mut Child, group_killed: &m
 /// succeeds: the native login first, then OpenRouter as a fallback. A failed
 /// attempt (non-zero exit) rolls on to the next; a timeout does not, since the
 /// model is likely working and a second full timeout would just double the
-/// wait. The reported elapsed time covers every attempt made.
+/// wait. The timeout is the whole leg's budget, so a fallback only gets what
+/// the failed attempt left of it. The reported elapsed time covers every
+/// attempt made.
 fn run_one(agent: Agent, prompt: &str, repo: &Path, timeout: Duration, skip_native: bool) -> Report {
     let started = Instant::now();
     let plan = agent.attempt_plan(skip_native);
@@ -121,7 +123,11 @@ fn run_one(agent: Agent, prompt: &str, repo: &Path, timeout: Duration, skip_nati
     let mut native_failed = false;
     let mut last: Option<Report> = None;
     for (i, &openrouter) in plan.iter().enumerate() {
-        let mut report = run_attempt(agent, prompt, repo, timeout, openrouter);
+        let left = timeout.saturating_sub(started.elapsed());
+        if i > 0 && left.is_zero() {
+            break;
+        }
+        let mut report = run_attempt(agent, prompt, repo, left, openrouter);
         report.fell_back = native_failed && openrouter;
         match report.outcome {
             Outcome::Ok | Outcome::TimedOut => {

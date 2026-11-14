@@ -79,7 +79,7 @@ struct RunArgs {
     no_update: bool,
 
     /// Per-agent timeout in seconds.
-    #[arg(long, default_value_t = 600)]
+    #[arg(long, default_value_t = 1200)]
     timeout: u64,
 
     /// Also write each agent's output to <DIR>/<agent>.md (untruncated) and

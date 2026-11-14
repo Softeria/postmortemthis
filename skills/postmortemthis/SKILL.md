@@ -55,8 +55,11 @@ setting `OPENROUTER_API_KEY`. Don't run `login` yourself, it's interactive.
 
 ## 3. Run
 
-Pipe the prompt on stdin. This drives several agents and can take a few minutes, so give
-it a generous timeout, and persist the output so a killed or scrolled-past run isn't lost:
+Pipe the prompt on stdin. The agents run in parallel, and each is cut off after 20 minutes
+(`--timeout`, in seconds), so a run can take that long, plus download time on first use.
+The replies are only printed once every agent is done, so a run killed early loses all of
+them. If your shell kills commands sooner than that, run it in the background and read the
+log when it finishes, or pass a `--timeout` that fits. Persist the output either way:
 
 ```bash
 cache="${XDG_CACHE_HOME:-$HOME/.cache}/postmortemthis/runs"
